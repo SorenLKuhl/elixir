@@ -1081,6 +1081,43 @@ defmodule Module.Types.Apply do
     end
   end
 
+  # Type check GenServer.call/2 and GenServer.call/3 based on the PID's protocol
+  defp remote_apply(GenServer, :call, _info, [pid_type, request_type], stack) do
+    remote_apply_genserver_call(pid_type, request_type, stack)
+  end
+
+  defp remote_apply(GenServer, :call, _info, [pid_type, request_type, _timeout], stack) do
+    remote_apply_genserver_call(pid_type, request_type, stack)
+  end
+
+  # Helper for GenServer.call type inference
+  defp remote_apply_genserver_call(pid_type, request_type, stack) do
+    # Look up the handle_call clauses for the current module - assuming the definition is in the same module as the call.
+    clauses = handle_call_clauses(stack.module, [], stack, %{cache: stack.cache, warnings: []})
+
+    # Go through the clauses and find those that match the request type
+    matching_responses =
+      Enum.flat_map(clauses, fn {[clause_request_type | _], return_type} ->
+        case compatible_intersection(request_type, clause_request_type) do
+          {:ok, _} ->
+            [return_type]
+          {:error, _} ->
+            []   # this clause does not match the request type
+        end
+      end)
+
+    case matching_responses do
+      [] ->
+        {:error, {:bad_genserver_call, stack.module, request_type, clauses}} # TODO: add better error message
+        # {:ok, dynamic()}
+      _ ->
+        # Union all matching return types to get the overall response type
+        response_type = Enum.reduce(matching_responses, &union/2)
+        {:ok, response_type}
+    end
+
+  end
+
   defp remote_apply(_mod, _fun, info, args_types, stack) do
     remote_apply(info, args_types, stack)
   end
@@ -1956,6 +1993,32 @@ defmodule Module.Types.Apply do
     }
   end
 
+  def format_diagnostic({{:bad_genserver_call, module, request_type, clauses}, mfac, expr, context}) do
+    {mod, fun, arity, _converter} = mfac
+    mfa = Exception.format_mfa(mod, fun, arity)
+    traces = collect_traces(expr, context)
+
+    %{
+      details: %{typing_traces: traces},
+      message:
+        IO.iodata_to_binary([
+          """
+          incompatible request type given to #{mfa}:
+
+              #{expr_to_string(expr) |> indent(4)}
+
+          given type:
+
+              #{to_quoted_string(request_type) |> indent(4)}
+
+          but expected a request type that matches one of the following clauses:
+          """,
+          format_traces(traces),
+          clauses_args_to_quoted_string(clauses, &Function.identity/1, collapse_structs: true)
+        ])
+    }
+  end
+
   defp empty_arg_reason(args_types) do
     if i = Enum.find_index(args_types, &empty?/1) do
       """
@@ -2080,6 +2143,20 @@ defmodule Module.Types.Apply do
     |> case do
       "(\n" <> _ = multiple_lines -> multiple_lines
       single_line -> binary_slice(single_line, 1..-2//1)
+    end
+  end
+
+  ### Helper to get GenServer handle_call clauses in the given module.
+  defp handle_call_clauses(module, meta, stack, context) do
+    case signature(module, :handle_call, 3, meta, stack, context) do
+      {{:infer, _domain, clauses}, context} ->
+        clauses
+
+      {{:strong, _domain, clauses}, context} ->
+        clauses
+
+      {:none, context} ->
+        []
     end
   end
 end
