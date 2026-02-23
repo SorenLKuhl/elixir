@@ -101,6 +101,8 @@ defmodule Module.Types.Apply do
     |> union(atom())
     |> union(tuple([atom(), atom()]))
 
+  @send_destination send_destination
+
   basic_arith_2_args_clauses = [
     {[integer(), integer()], integer()},
     {[integer(), float()], float()},
@@ -737,6 +739,14 @@ defmodule Module.Types.Apply do
     {{:strong, nil, [{domain, term()}]}, domain, context}
   end
 
+  def remote_domain(:erlang, :send, [dest, msg], _expected, _meta, _stack, context) do
+    IO.puts("remote_domain: send with dest = #{inspect(dest)}, msg = #{inspect(msg)}")
+    # For now, accept term() for dest and term() for msg — the real check
+    # happens after types are resolved in remote_apply.
+    domain = [@send_destination, term()]
+    {{:strong, nil, [{domain, dynamic()}]}, domain, context}
+  end
+
   def remote_domain(:maps, :get, [key, _], expected, _meta, _stack, context) when is_atom(key) do
     domain = [term(), open_map([{key, expected}])]
     {{:strong, nil, [{domain, term()}]}, domain, context}
@@ -807,6 +817,45 @@ defmodule Module.Types.Apply do
     case list_tl(list) do
       {:ok, value_type} -> {:ok, return(value_type, [list], stack)}
       :badnonemptylist -> {:error, badremote(:erlang, :tl, [list])}
+    end
+  end
+
+  defp remote_apply(:erlang, :spawn, info, [fun], stack) do
+    IO.puts("remote_apply: spawn with fun = #{inspect(fun, pretty: true)}, info = #{inspect(info, pretty: true)}")
+    # Find receive calls in the function body and extract the message types from them
+    receive_message_types = receive_types_in_body(fun)
+    pid_type = pid(term())
+    # pid_type = pid(binary())
+    {:ok, return(pid_type, [fun], stack)}
+
+  end
+
+  defp receive_types_in_body(fun) do
+
+  end
+
+  defp remote_apply(:erlang, :send, _info, [dest, msg] = args_types, stack) do
+    # Extract the pid component from the destination type (may be a union with atom/port/ref)
+    # IO.puts("remote_apply: dest = #{inspect(dest)}, msg = #{inspect(msg)}")
+    case pid_message_type(dest) do
+      :none ->
+        # IO.puts("remote_apply: no pid in dest, falling back to normal check")
+        # No pid in the destination type — fall through to normal strong arrow check
+        remote_apply(:none, args_types, stack)
+
+      :term ->
+        # IO.puts("remote_apply: untyped pid in dest, skipping message check")
+        # Untyped pid() — skip check, return dynamic as before
+        {:ok, return(dynamic(), args_types, stack)}
+
+      msg_type ->
+        # IO.puts("remote_apply: typed pid in dest, checking message type #{inspect(msg_type)}")
+        # Typed pid — verify the message is a subtype
+        if subtype?(msg, msg_type) do
+          {:ok, return(dynamic(), args_types, stack)}
+        else
+          {:error, {:bad_typed_pid_send, dest, msg, msg_type}}
+        end
     end
   end
 
@@ -2016,6 +2065,19 @@ defmodule Module.Types.Apply do
           format_traces(traces),
           clauses_args_to_quoted_string(clauses, &Function.identity/1, collapse_structs: true)
         ])
+    }
+  end
+
+  def format_diagnostic({{:bad_typed_pid_send, dest_type, msg_type, expected_type}, mfac, expr, context}) do
+    {mod, fun, arity, _} = mfac
+    %{
+      details: %{typing_traces: collect_traces(expr, context)},
+      message: IO.iodata_to_binary(["""
+      incompatible message type in send/2 call to #{Exception.format_mfa(mod, fun, arity)}:
+      expected: #{to_quoted_string(expected_type)}
+      got:      #{to_quoted_string(msg_type)}
+      pid type: #{to_quoted_string(dest_type)}
+      """])
     }
   end
 
