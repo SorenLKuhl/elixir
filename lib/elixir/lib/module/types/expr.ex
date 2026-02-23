@@ -469,6 +469,31 @@ defmodule Module.Types.Expr do
     end
   end
 
+  # TODO:
+  def of_expr({{:., _, [:erlang, :spawn]}, _meta, [fun_arg]} = call, _expected, _expr, stack, context) do
+    # Extract receive clauses from the fn body and compute the union of their pattern types,
+    # giving us the type of messages this spawned process expects to receive.
+    {msg_type, context} =
+      fun_arg
+      |> find_receive_clauses()
+      |> Enum.reduce({none(), context}, fn {:->, clause_meta, [head, _body]}, {acc, context} ->
+        {patterns, guards} = extract_head(head)
+
+        {trees, _precise?, context} =
+          Pattern.of_head(patterns, guards, [dynamic()], :receive, clause_meta, stack, context)
+
+        case Pattern.of_domain(trees, stack, context) do
+          [pattern_type | _] -> {union(pattern_type, acc), context}
+          [] -> {acc, context}
+        end
+      end)
+
+    # Still type-check the fun_arg body so errors inside it are reported.
+    {_fun_type, context} = of_expr(fun_arg, dynamic(fun(0)), call, stack, context)
+
+    {pid(msg_type), context}
+  end
+
   def of_expr({{:., _, [remote, name]}, meta, args} = call, expected, _expr, stack, context) do
     {remote_type, context} = of_expr(remote, atom(), call, stack, context)
     {mods, context} = Of.modules(remote_type, name, length(args), call, meta, stack, context)
@@ -673,6 +698,25 @@ defmodule Module.Types.Expr do
 
     context
   end
+
+  ## Spawn helpers TODO:
+
+  # Recursively traverses a `fn` body and collects all `{:->, ...}` clauses
+  # found inside `receive` blocks, no matter how deeply nested.
+  defp find_receive_clauses({:receive, _, [blocks]}) do
+    case Keyword.fetch(blocks, :do) do
+      {:ok, {:__block__, _, clauses}} -> clauses
+      {:ok, clauses} when is_list(clauses) -> clauses
+      {:ok, clause} -> [clause]
+      :error -> []
+    end
+  end
+
+  defp find_receive_clauses({_, _, children}) when is_list(children) do
+    Enum.flat_map(children, &find_receive_clauses/1)
+  end
+
+  defp find_receive_clauses(_), do: []
 
   ## General helpers
 

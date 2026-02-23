@@ -824,19 +824,14 @@ defmodule Module.Types.Apply do
     end
   end
 
-  defp remote_apply(:erlang, :spawn, info, [fun], stack) do
-    IO.puts("remote_apply: spawn with fun = #{inspect(fun, pretty: true)}, info = #{inspect(info, pretty: true)}")
-    # Find receive calls in the function body and extract the message types from them
-    receive_message_types = receive_types_in_body(fun)
-    pid_type = pid(term())
-    # pid_type = pid(binary())
-    {:ok, return(pid_type, [fun], stack)}
-
-  end
-
-  defp receive_types_in_body(fun) do
-
-  end
+  # TODO: remove?
+  # defp remote_apply(:erlang, :spawn, info, [fun], stack) do
+  #   # Find receive calls in the function body and extract the message types from them
+  #   receive_message_types = receive_types_in_body(fun)
+  #   pid_type = pid(term())
+  #   # pid_type = pid(binary())
+  #   {:ok, return(pid_type, [fun], stack)}
+  # end
 
   defp remote_apply(:erlang, :send, _info, [dest, msg] = args_types, stack) do
     # Extract the pid component from the destination type (may be a union with atom/port/ref)
