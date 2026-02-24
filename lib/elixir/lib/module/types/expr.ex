@@ -469,22 +469,35 @@ defmodule Module.Types.Expr do
     end
   end
 
-  # TODO:
   def of_expr({{:., _, [:erlang, :spawn]}, _meta, [fun_arg]} = call, _expected, _expr, stack, context) do
-    # Extract receive clauses from the fn body and compute the union of their pattern types,
-    # giving us the type of messages this spawned process expects to receive.
-    {msg_type, context} =
+    # Extract accepted message types from receive clauses in the given function argument.
+    msg_type =
       fun_arg
       |> find_receive_clauses()
-      |> Enum.reduce({none(), context}, fn {:->, clause_meta, [head, _body]}, {acc, context} ->
+      |> Enum.reduce(none(), fn {:->, clause_meta, [head, body]}, acc ->
         {patterns, guards} = extract_head(head)
+        sanitized = Enum.map(patterns, &sanitize_pinned_vars/1)
+        {trees, _precise?, clause_ctx} =
+          Pattern.of_head(sanitized, guards, [dynamic()], :receive, clause_meta, stack, context)
 
-        {trees, _precise?, context} =
-          Pattern.of_head(patterns, guards, [dynamic()], :receive, clause_meta, stack, context)
+        # Pre-declare every variable referenced in the body that is not yet in clause_ctx.
+        # Variables bound inside the fn before the receive (e.g. `mon_ref`) are absent
+        # from clause_ctx at this point; refine_body_var does a hard pattern match on
+        # context.vars and would crash for any undeclared version.
+        # Of.declare_var is a no-op when the version is already present, so outer-scope
+        # variables (function parameters) are left with their real types.
+        clause_ctx = declare_body_vars(body, clause_ctx)
 
-        case Pattern.of_domain(trees, stack, context) do
-          [pattern_type | _] -> {union(pattern_type, acc), context}
-          [] -> {acc, context}
+        # Run the body so that occurrence typing (arithmetic, string ops, nested case/cond,
+        # etc.) further refines the pattern variables in clause_ctx.  of_domain then uses
+        # the tighter variable types when reconstructing the domain type.
+        # Warnings emitted here are discarded with clause_ctx; they will be re-emitted
+        # during the full of_expr(fun_arg, ...) check below.
+        {_body_type, clause_ctx} = of_expr(body, @pending, body, stack, clause_ctx)
+
+        case Pattern.of_domain(trees, stack, clause_ctx) do
+          [pattern_type | _] -> union(pattern_type, acc)
+          [] -> acc
         end
       end)
 
@@ -699,19 +712,69 @@ defmodule Module.Types.Expr do
     context
   end
 
-  ## Spawn helpers TODO:
+  ## Spawn helpers
+
+  # Replaces every pinned variable ({:^, meta, [var]}) in a pattern with a wildcard
+  # ({:_, meta, nil}). This is necessary before passing receive clause patterns to
+  # Pattern.of_head when the patterns are inside a fn body: the pinned vars are bound
+  # there and are not yet in context.vars at the point we do the pre-pass analysis,
+  # which would cause refine_head_var to crash with a CaseClauseError.
+  # Ordinary pattern variables and guards are left intact so type inference still works.
+  defp sanitize_pinned_vars({:^, meta, [_var]}), do: {:_, meta, nil}
+
+  defp sanitize_pinned_vars({form, meta, args}) when is_list(args),
+    do: {form, meta, Enum.map(args, &sanitize_pinned_vars/1)}
+
+  defp sanitize_pinned_vars({left, right}),
+    do: {sanitize_pinned_vars(left), sanitize_pinned_vars(right)}
+
+  defp sanitize_pinned_vars(list) when is_list(list),
+    do: Enum.map(list, &sanitize_pinned_vars/1)
+
+  defp sanitize_pinned_vars(other), do: other
+
+  # Walks an AST and pre-declares every versioned variable as dynamic() in context.
+  # This is needed before running of_expr on a receive clause body: variables bound
+  # earlier in the fn body (before the receive) are absent from clause_ctx, and
+  # refine_body_var would crash with a MatchError on any undeclared version.
+  # Of.declare_var is a no-op for versions already present, so outer-scope variables
+  # retain their real inferred types.
+  defp declare_body_vars(ast, context) do
+    {_, context} =
+      Macro.prewalk(ast, context, fn
+        {name, meta, ctx} = var, context when is_atom(name) and is_atom(ctx) and name != :_ ->
+          case Keyword.fetch(meta, :version) do
+            {:ok, _} -> {var, Of.declare_var(var, context)}
+            :error -> {var, context}
+          end
+
+        node, context ->
+          {node, context}
+      end)
+
+    context
+  end
 
   # Recursively traverses a `fn` body and collects all `{:->, ...}` clauses
   # found inside `receive` blocks, no matter how deeply nested.
   defp find_receive_clauses({:receive, _, [blocks]}) do
-    case Keyword.fetch(blocks, :do) do
+    top_clauses =
+      case Keyword.fetch(blocks, :do) do
       {:ok, {:__block__, _, clauses}} -> clauses
       {:ok, clauses} when is_list(clauses) -> clauses
       {:ok, clause} -> [clause]
       :error -> []
     end
+
+    nested_clauses = Enum.flat_map(top_clauses, fn
+      {:->, _, [_head, body]} -> find_receive_clauses(body)
+      _ -> []
+    end)
+
+    top_clauses ++ nested_clauses
   end
 
+  # If we find a fn body we keep looking for receive clauses inside.
   defp find_receive_clauses({_, _, children}) when is_list(children) do
     Enum.flat_map(children, &find_receive_clauses/1)
   end

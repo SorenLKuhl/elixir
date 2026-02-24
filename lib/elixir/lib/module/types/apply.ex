@@ -744,7 +744,6 @@ defmodule Module.Types.Apply do
   end
 
   def remote_domain(:erlang, :send, [dest, msg], _expected, _meta, _stack, context) do
-    IO.puts("remote_domain: send with dest = #{inspect(dest)}, msg = #{inspect(msg)}")
     # For now, accept term() for dest and term() for msg — the real check
     # happens after types are resolved in remote_apply.
     domain = [@send_destination, term()]
@@ -824,31 +823,18 @@ defmodule Module.Types.Apply do
     end
   end
 
-  # TODO: remove?
-  # defp remote_apply(:erlang, :spawn, info, [fun], stack) do
-  #   # Find receive calls in the function body and extract the message types from them
-  #   receive_message_types = receive_types_in_body(fun)
-  #   pid_type = pid(term())
-  #   # pid_type = pid(binary())
-  #   {:ok, return(pid_type, [fun], stack)}
-  # end
-
   defp remote_apply(:erlang, :send, _info, [dest, msg] = args_types, stack) do
     # Extract the pid component from the destination type (may be a union with atom/port/ref)
-    # IO.puts("remote_apply: dest = #{inspect(dest)}, msg = #{inspect(msg)}")
     case pid_message_type(dest) do
       :none ->
-        # IO.puts("remote_apply: no pid in dest, falling back to normal check")
         # No pid in the destination type — fall through to normal strong arrow check
         remote_apply(:none, args_types, stack)
 
       :term ->
-        # IO.puts("remote_apply: untyped pid in dest, skipping message check")
         # Untyped pid() — skip check, return dynamic as before
         {:ok, return(dynamic(), args_types, stack)}
 
       msg_type ->
-        # IO.puts("remote_apply: typed pid in dest, checking message type #{inspect(msg_type)}")
         # Typed pid — verify the message is a subtype
         if subtype?(msg, msg_type) do
           {:ok, return(dynamic(), args_types, stack)}
