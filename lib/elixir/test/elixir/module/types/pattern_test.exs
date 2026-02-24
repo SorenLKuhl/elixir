@@ -179,6 +179,26 @@ defmodule Module.Types.PatternTest do
   end
 
   describe "structs" do
+    test "unknown struct" do
+      {_, [diagnostic]} = typediag!([%UNKNOWN.URI{} = x], x)
+      assert diagnostic.severity == :error
+
+      assert diagnostic.message ==
+               "struct UNKNOWN.URI is undefined (module UNKNOWN.URI is not available or is yet to be defined)"
+
+      {_, [diagnostic]} = typediag!([%Enumerable{} = x], x)
+      assert diagnostic.severity == :error
+
+      assert diagnostic.message ==
+               "struct Enumerable is undefined (there is such module but it does not define a struct)"
+    end
+
+    test "unknown field" do
+      {_, [diagnostic]} = typediag!([%URI{unknown: _} = x], x)
+      assert diagnostic.severity == :error
+      assert diagnostic.message == "unknown key :unknown for struct URI"
+    end
+
     test "variable name" do
       assert typecheck!([%x{}], x) == dynamic(atom())
     end
@@ -849,9 +869,10 @@ defmodule Module.Types.PatternTest do
     test "with non-singleton literals" do
       assert typecheck!([x], x == "foo", x) == dynamic(binary())
       assert typecheck!([x], x === "foo", x) == dynamic(binary())
+      assert typecheck!([x], x in ["foo", "bar", "baz"], x) == dynamic(binary())
       assert typecheck!([x], not (x == "foo"), x) == dynamic()
       assert typecheck!([x], not (x === "foo"), x) == dynamic()
-      assert typecheck!([x], x in ["foo", "bar", "baz"], x) == dynamic(binary())
+      assert typecheck!([x], x not in ["foo", "bar", "baz"], x) == dynamic()
 
       assert typecheck!([x], x != "foo", x) == dynamic()
       assert typecheck!([x], x !== "foo", x) == dynamic()
@@ -867,8 +888,10 @@ defmodule Module.Types.PatternTest do
     test "with number literals" do
       assert typecheck!([x], x == 1, x) == dynamic(union(integer(), float()))
       assert typecheck!([x], x === 1, x) == dynamic(integer())
+      assert typecheck!([x], x in [1, 2, 3], x) == dynamic(integer())
       assert typecheck!([x], not (x == 1), x) == dynamic()
       assert typecheck!([x], not (x === 1), x) == dynamic()
+      assert typecheck!([x], x not in [1, 2, 3], x) == dynamic()
 
       assert typecheck!([x], x != 1, x) == dynamic()
       assert typecheck!([x], x !== 1, x) == dynamic()
@@ -877,8 +900,10 @@ defmodule Module.Types.PatternTest do
 
       assert typecheck!([x], x == 1.0, x) == dynamic(union(integer(), float()))
       assert typecheck!([x], x === 1.0, x) == dynamic(float())
+      assert typecheck!([x], x in [1.0, 2.0, 3.0], x) == dynamic(float())
       assert typecheck!([x], not (x == 1.0), x) == dynamic()
       assert typecheck!([x], not (x === 1.0), x) == dynamic()
+      assert typecheck!([x], x not in [1.0, 2.0, 3.0], x) == dynamic()
 
       assert typecheck!([x], x != 1.0, x) == dynamic()
       assert typecheck!([x], x !== 1.0, x) == dynamic()
@@ -889,8 +914,10 @@ defmodule Module.Types.PatternTest do
     test "with singleton literals" do
       assert typecheck!([x], x == :foo, x) == dynamic(atom([:foo]))
       assert typecheck!([x], x === :foo, x) == dynamic(atom([:foo]))
+      assert typecheck!([x], x in [:foo, :bar, :baz], x) == dynamic(atom([:foo, :bar, :baz]))
       assert typecheck!([x], not (x == :foo), x) == dynamic(negation(atom([:foo])))
       assert typecheck!([x], not (x === :foo), x) == dynamic(negation(atom([:foo])))
+      assert typecheck!([x], x not in [:foo, :bar], x) == dynamic(negation(atom([:foo, :bar])))
 
       assert typecheck!([x], x != :foo, x) == dynamic(negation(atom([:foo])))
       assert typecheck!([x], x !== :foo, x) == dynamic(negation(atom([:foo])))
@@ -909,6 +936,14 @@ defmodule Module.Types.PatternTest do
 
       assert typecheck!([x], x != %{}, x) == dynamic(negation(empty_map()))
       assert typecheck!([x = %{}], x != %{}, x) == dynamic(difference(open_map(), empty_map()))
+    end
+
+    test "mixed-in" do
+      assert typecheck!([x], x in [:foo, 1, :bar, 2.0, :baz], x) ==
+               dynamic(union(atom([:foo, :bar, :baz]), union(integer(), float())))
+
+      assert typecheck!([x], x not in [:foo, 1, :bar, 2.0, :baz], x) ==
+               dynamic(negation(atom([:foo, :bar, :baz])))
     end
 
     test "with singleton literals and composite types" do
