@@ -4,6 +4,7 @@
 
 %% Module responsible for tracking lexical information.
 -module(elixir_lexical).
+-feature(maybe_expr, enable).
 -export([run/3, with_file/3, trace/2, format_error/1]).
 -include("elixir.hrl").
 
@@ -40,8 +41,15 @@ trace({require, Meta, Module, _Opts}, #{lexical_tracker := Pid}) ->
     _ -> ?tracker:add_export(Pid, Module)
   end,
   ok;
-trace({struct_expansion, _Meta, Module, _Keys}, #{lexical_tracker := Pid}) ->
-  ?tracker:add_export(Pid, Module),
+trace({struct_expansion, Meta, Module, _Keys}, #{lexical_tracker := Pid} = E) ->
+  maybe
+    #{function := {_, _}} ?= E,
+    Operation = proplists:get_value(operation, Meta, unknown),
+    true ?= (Operation =:= match) orelse (Operation =:= update),
+    ?tracker:remote_dispatch(Pid, Module, runtime)
+  else
+    _ -> ?tracker:add_export(Pid, Module)
+  end,
   ok;
 trace({alias_reference, _Meta, Module}, #{lexical_tracker := Pid} = E) ->
   case E of
