@@ -483,42 +483,22 @@ defmodule Module.Types.Expr do
     end
   end
 
+  # Add receive accumulator to context and let the receive clauses update it as they are processed.
+  # This way we can reuse all the machinery we already have for processing receive clauses,
+  # and we don't need to worry about sanitizing pinned vars or declaring body variables.
+  # NOTE: this does not narrow the type based on the clause bodies.
   def of_expr({{:., _, [:erlang, :spawn]}, _meta, [fun_arg]} = call, _expected, _expr, stack, context) do
-    # Extract accepted message types from receive clauses in the given function argument.
-    msg_type =
-      fun_arg
-      |> find_receive_clauses()
-      |> Enum.reduce(none(), fn {:->, clause_meta, [head, body]}, acc ->
-        {patterns, guards} = extract_head(head)
-        sanitized = Enum.map(patterns, &sanitize_pinned_vars/1)
-        {trees, _precise?, clause_ctx} =
-          Pattern.of_head(sanitized, guards, [dynamic()], :receive, clause_meta, stack, context)
+    # Add accumulator to context
+    context = Map.put(context, :receive_acc, none())
 
-        # Pre-declare every variable referenced in the body that is not yet in clause_ctx.
-        # Variables bound inside the fn before the receive (e.g. `mon_ref`) are absent
-        # from clause_ctx at this point; refine_body_var does a hard pattern match on
-        # context.vars and would crash for any undeclared version.
-        # Of.declare_var is a no-op when the version is already present, so outer-scope
-        # variables (function parameters) are left with their real types.
-        clause_ctx = declare_body_vars(body, clause_ctx)
-
-        # Run the body so that occurrence typing (arithmetic, string ops, nested case/cond,
-        # etc.) further refines the pattern variables in clause_ctx.  of_domain then uses
-        # the tighter variable types when reconstructing the domain type.
-        # Warnings emitted here are discarded with clause_ctx; they will be re-emitted
-        # during the full of_expr(fun_arg, ...) check below.
-        {_body_type, clause_ctx} = of_expr(body, @pending, body, stack, clause_ctx)
-
-        case Pattern.of_domain(trees, stack, clause_ctx) do
-          [pattern_type | _] -> union(pattern_type, acc)
-          [] -> acc
-        end
-      end)
-
-    # Still type-check the fun_arg body so errors inside it are reported.
+    # Process the fun_arg passed to spawn/1 to fill the receive_acc
     {_fun_type, context} = of_expr(fun_arg, dynamic(fun(0)), call, stack, context)
 
-    {pid(msg_type), context}
+    # Retrieve the accepted message types
+    msg_type = context.receive_acc
+
+    # Remove the receive accumulator as to not mess up other receive clauses
+    {pid(msg_type), Map.delete(context, :receive_acc)}
   end
 
   def of_expr({{:., _, [remote, name]}, meta, args} = call, expected, _expr, stack, context) do
@@ -725,75 +705,6 @@ defmodule Module.Types.Expr do
     context
   end
 
-  ## Spawn helpers
-
-  # Replaces every pinned variable ({:^, meta, [var]}) in a pattern with a wildcard
-  # ({:_, meta, nil}). This is necessary before passing receive clause patterns to
-  # Pattern.of_head when the patterns are inside a fn body: the pinned vars are bound
-  # there and are not yet in context.vars at the point we do the pre-pass analysis,
-  # which would cause refine_head_var to crash with a CaseClauseError.
-  # Ordinary pattern variables and guards are left intact so type inference still works.
-  defp sanitize_pinned_vars({:^, meta, [_var]}), do: {:_, meta, nil}
-
-  defp sanitize_pinned_vars({form, meta, args}) when is_list(args),
-    do: {form, meta, Enum.map(args, &sanitize_pinned_vars/1)}
-
-  defp sanitize_pinned_vars({left, right}),
-    do: {sanitize_pinned_vars(left), sanitize_pinned_vars(right)}
-
-  defp sanitize_pinned_vars(list) when is_list(list),
-    do: Enum.map(list, &sanitize_pinned_vars/1)
-
-  defp sanitize_pinned_vars(other), do: other
-
-  # Walks an AST and pre-declares every versioned variable as dynamic() in context.
-  # This is needed before running of_expr on a receive clause body: variables bound
-  # earlier in the fn body (before the receive) are absent from clause_ctx, and
-  # refine_body_var would crash with a MatchError on any undeclared version.
-  # Of.declare_var is a no-op for versions already present, so outer-scope variables
-  # retain their real inferred types.
-  defp declare_body_vars(ast, context) do
-    {_, context} =
-      Macro.prewalk(ast, context, fn
-        {name, meta, ctx} = var, context when is_atom(name) and is_atom(ctx) and name != :_ ->
-          case Keyword.fetch(meta, :version) do
-            {:ok, _} -> {var, Of.declare_var(var, context)}
-            :error -> {var, context}
-          end
-
-        node, context ->
-          {node, context}
-      end)
-
-    context
-  end
-
-  # Recursively traverses a `fn` body and collects all `{:->, ...}` clauses
-  # found inside `receive` blocks, no matter how deeply nested.
-  defp find_receive_clauses({:receive, _, [blocks]}) do
-    top_clauses =
-      case Keyword.fetch(blocks, :do) do
-      {:ok, {:__block__, _, clauses}} -> clauses
-      {:ok, clauses} when is_list(clauses) -> clauses
-      {:ok, clause} -> [clause]
-      :error -> []
-    end
-
-    nested_clauses = Enum.flat_map(top_clauses, fn
-      {:->, _, [_head, body]} -> find_receive_clauses(body)
-      _ -> []
-    end)
-
-    top_clauses ++ nested_clauses
-  end
-
-  # If we find a fn body we keep looking for receive clauses inside.
-  defp find_receive_clauses({_, _, children}) when is_list(children) do
-    Enum.flat_map(children, &find_receive_clauses/1)
-  end
-
-  defp find_receive_clauses(_), do: []
-
   ## General helpers
 
   defp apply_many([], fun, args, expected, expr, stack, context) do
@@ -882,6 +793,16 @@ defmodule Module.Types.Expr do
                   |> Pattern.of_pattern_tree(stack, context)
                   |> upper_bound()
                 end)
+
+              context =
+                if Map.has_key?(context, :receive_acc) do
+                  # Update context to accumulate the types of messages accepted by receive clauses.
+                  # This is used to infer the type of spawn/1.
+                  Enum.reduce(clause_type, context, fn type, context ->
+                    update_in(context.receive_acc, &union(&1, type))
+                  end)
+                  else context
+                end
 
               cond do
                 stack.mode != :infer and previous != [] and
