@@ -794,16 +794,6 @@ defmodule Module.Types.Expr do
                   |> upper_bound()
                 end)
 
-              context =
-                if Map.has_key?(context, :receive_acc) and clause_info == :receive do
-                  # Update context to accumulate the types of messages accepted by receive clauses.
-                  # This is used to infer the type of spawn/1.
-                  Enum.reduce(clause_type, context, fn type, context ->
-                    update_in(context.receive_acc, &union(&1, type))
-                  end)
-                  else context
-                end
-
               cond do
                 stack.mode != :infer and previous != [] and
                     Pattern.args_subtype?(clause_type, previous) ->
@@ -819,6 +809,23 @@ defmodule Module.Types.Expr do
             end
 
           {result, context} = of_expr(body, expected, body, stack, context)
+
+          # Try and narrow type based on clause body
+          context =
+            if Map.has_key?(context, :receive_acc) and clause_info == :receive and not context.failed do
+              body_clause_type =
+                Enum.map(trees, fn {tree, _, _} ->
+                  tree
+                  |> Pattern.of_pattern_tree(stack, context)
+                  |> upper_bound()
+                end)
+
+              Enum.reduce(body_clause_type, context, fn type, context ->
+                update_in(context.receive_acc, &union(&1, type))
+              end)
+            else
+              context
+            end
 
           {union(result, acc), previous,
            context |> set_failed(failed?) |> Of.reset_vars(original)}
