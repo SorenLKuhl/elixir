@@ -487,7 +487,13 @@ defmodule Module.Types.Expr do
   # This way we can reuse all the machinery we already have for processing receive clauses,
   # and we don't need to worry about sanitizing pinned vars or declaring body variables.
   # NOTE: this does not narrow the type based on the clause bodies.
-  def of_expr({{:., _, [:erlang, :spawn]}, _meta, [fun_arg]} = call, _expected, _expr, stack, context) do
+  def of_expr(
+        {{:., _, [:erlang, :spawn]}, _meta, [fun_arg]} = call,
+        _expected,
+        _expr,
+        stack,
+        context
+      ) do
     # Add accumulator to context
     context = Map.put(context, :receive_acc, none())
 
