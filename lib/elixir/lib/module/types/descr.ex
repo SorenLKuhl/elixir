@@ -24,7 +24,8 @@ defmodule Module.Types.Descr do
   # @bit_pid 0b100000
   @bit_port 0b1000000
   @bit_reference 0b10000000
-  @bit_top 0b11011111 # All bits exepts old pid bit, which we don't use anymore
+  # All bits exepts old pid bit, which we don't use anymore
+  @bit_top 0b11011111
 
   # We use two bits to represent bitstrings and binaries,
   # which must be looked at together
@@ -40,7 +41,7 @@ defmodule Module.Types.Descr do
   @domain_key_types [:binary, :integer, :float, :pid, :port, :reference] ++
                       [:fun, :atom, :tuple, :map, :list]
   # @domain_key_types [:binary, :integer, :float, :port, :reference] ++
-                      [:fun, :atom, :tuple, :map, :list]
+  [:fun, :atom, :tuple, :map, :list]
 
   # Remark: those are explicit BDD constructors. The functional constructors are `bdd_new/1` and `bdd_new/3`.
   @fun_top {:negation, %{}}
@@ -2443,9 +2444,12 @@ defmodule Module.Types.Descr do
   defp pid_empty?(:term), do: false
   defp pid_empty?(msg_type), do: empty?(msg_type)
 
-  defp pid_to_quoted(:term, _opts), do: [{:pid, [], []}]   # renders as  pid()
+  # renders as  pid()
+  defp pid_to_quoted(:term, _opts), do: [{:pid, [], []}]
+
   defp pid_to_quoted(msg_type, opts) do
-    [{:pid, [], [to_quoted(msg_type, opts)]}]               # renders as  pid(integer())
+    # renders as  pid(integer())
+    [{:pid, [], [to_quoted(msg_type, opts)]}]
   end
 
   defp pid_difference(t1, t2) do
@@ -2455,15 +2459,18 @@ defmodule Module.Types.Descr do
   # Returns :none if no pid component, :term if untyped pid(),
   # or the message descr if typed pid(T).
   def pid_message_type(%{pid: t}), do: t
-  def pid_message_type(:term), do: :term          # term() contains pid()
+  # term() contains pid()
+  def pid_message_type(:term), do: :term
   def pid_message_type(%{dynamic: :term}), do: :term
   def pid_message_type(%{dynamic: pid_type}), do: pid_message_type(pid_type)
+
   def pid_message_type(%{map: {:closed, fields}}) when is_map(fields) do
     case Map.fetch(fields, :pid) do
       {:ok, pid_type} -> pid_message_type(pid_type)
       :error -> :none
     end
   end
+
   def pid_message_type(_), do: :none
 
   ## Dynamic

@@ -1182,21 +1182,24 @@ defmodule Module.Types.Apply do
         case compatible_intersection(request_type, clause_request_type) do
           {:ok, _} ->
             [return_type]
+
           {:error, _} ->
-            []   # this clause does not match the request type
+            # this clause does not match the request type
+            []
         end
       end)
 
     case matching_responses do
       [] ->
-        {:error, {:bad_genserver_call, stack.module, request_type, clauses}} # TODO: add better error message
-        # {:ok, dynamic()}
+        # TODO: add better error message
+        {:error, {:bad_genserver_call, stack.module, request_type, clauses}}
+
+      # {:ok, dynamic()}
       _ ->
         # Union all matching return types to get the overall response type
         response_type = Enum.reduce(matching_responses, &union/2)
         {:ok, response_type}
     end
-
   end
 
   defp remote_apply(_mod, _fun, info, args_types, stack) do
@@ -2059,7 +2062,9 @@ defmodule Module.Types.Apply do
     }
   end
 
-  def format_diagnostic({{:bad_genserver_call, module, request_type, clauses}, mfac, expr, context}) do
+  def format_diagnostic(
+        {{:bad_genserver_call, module, request_type, clauses}, mfac, expr, context}
+      ) do
     {mod, fun, arity, _converter} = mfac
     mfa = Exception.format_mfa(mod, fun, arity)
     traces = collect_traces(expr, context)
@@ -2085,16 +2090,22 @@ defmodule Module.Types.Apply do
     }
   end
 
-  def format_diagnostic({{:bad_typed_pid_send, dest_type, msg_type, expected_type}, mfac, expr, context}) do
+  def format_diagnostic(
+        {{:bad_typed_pid_send, dest_type, msg_type, expected_type}, mfac, expr, context}
+      ) do
     {mod, fun, arity, _} = mfac
+
     %{
       details: %{typing_traces: collect_traces(expr, context)},
-      message: IO.iodata_to_binary(["""
-      incompatible message type in send/2 call to #{Exception.format_mfa(mod, fun, arity)}:
-      expected: #{to_quoted_string(expected_type)}
-      got:      #{to_quoted_string(msg_type)}
-      pid type: #{to_quoted_string(dest_type)}
-      """])
+      message:
+        IO.iodata_to_binary([
+          """
+          incompatible message type in send/2 call to #{Exception.format_mfa(mod, fun, arity)}:
+          expected: #{to_quoted_string(expected_type)}
+          got:      #{to_quoted_string(msg_type)}
+          pid type: #{to_quoted_string(dest_type)}
+          """
+        ])
     }
   end
 
