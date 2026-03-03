@@ -795,7 +795,7 @@ defmodule Module.Types.Expr do
                 end)
 
               context =
-                if Map.has_key?(context, :receive_acc) do
+                if Map.has_key?(context, :receive_acc) and clause_info == :receive do
                   # Update context to accumulate the types of messages accepted by receive clauses.
                   # This is used to infer the type of spawn/1.
                   Enum.reduce(clause_type, context, fn type, context ->
