@@ -503,6 +503,8 @@ defmodule Module.Types.Expr do
     # Retrieve the accepted message types
     msg_type = context.receive_acc
 
+    # {pid(msg_type, fun_type), Map.delete(context, :receive_acc)}
+
     # Remove the receive accumulator as to not mess up other receive clauses
     {pid(msg_type), Map.delete(context, :receive_acc)}
   end
@@ -818,7 +820,8 @@ defmodule Module.Types.Expr do
 
           # Try and narrow type based on clause body
           context =
-            if Map.has_key?(context, :receive_acc) and clause_info == :receive and not context.failed do
+            if Map.has_key?(context, :receive_acc) and clause_info == :receive and
+                 not context.failed do
               body_clause_type =
                 Enum.map(trees, fn {tree, _, _} ->
                   tree

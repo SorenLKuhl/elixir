@@ -50,6 +50,7 @@ defmodule Module.Types.Descr do
   @non_empty_list_top {:term, :term}
   @tuple_top {:open, []}
   @map_empty {:closed, %{}}
+  @pid_top {:term, :none}
 
   # The top BDD for each arity.
   @fun_bdd_top :bdd_top
@@ -62,7 +63,7 @@ defmodule Module.Types.Descr do
     map: @map_top,
     list: @non_empty_list_top,
     fun: @fun_top,
-    pid: :term
+    pid: @pid_top
   }
   @list_top %{bitmap: @bit_empty_list, list: @non_empty_list_top}
   @empty_list %{bitmap: @bit_empty_list}
@@ -105,8 +106,9 @@ defmodule Module.Types.Descr do
   def open_map(), do: %{map: @map_top}
   def open_map(pairs), do: map_descr(:open, pairs)
   def open_tuple(elements, _fallback \\ term()), do: tuple_descr(:open, elements)
-  def pid(), do: %{pid: :term}
-  def pid(msg_type), do: %{pid: msg_type}
+  def pid(), do: %{pid: @pid_top}
+  def pid(msg_type), do: %{pid: {msg_type, :none}}
+  def pid(msg_type, return_type), do: %{pid: {msg_type, return_type}}
   def port(), do: %{bitmap: @bit_port}
   def reference(), do: %{bitmap: @bit_reference}
   def tuple(), do: %{tuple: @tuple_top}
@@ -2434,31 +2436,59 @@ defmodule Module.Types.Descr do
   # Contravariant akin to pekko
   # defp pid_union(t1, t2), do: intersection(t1, t2)
   # Covariant
-  defp pid_union(t1, t2), do: union(t1, t2)
+  defp pid_union({msg1, ret1}, {msg2, ret2}) do
+    ret =
+      case {ret1, ret2} do
+        {:none, :none} -> :none
+        {:none, r} -> r
+        {r, :none} -> r
+        {r1, r2} -> union(r1, r2)
+      end
+
+    {union(msg1, msg2), ret}
+  end
 
   # Contravariant akin to pekko
   # defp pid_intersection(t1, t2), do: union(t1, t2)
   # Covariant
-  defp pid_intersection(t1, t2), do: intersection(t1, t2)
+  defp pid_intersection({msg1, ret1}, {msg2, ret2}) do
+    msg = intersection(msg1, msg2)
 
-  defp pid_empty?(:term), do: false
-  defp pid_empty?(msg_type), do: empty?(msg_type)
+    if empty?(msg) do
+      0
+    else
+      ret =
+        case {ret1, ret2} do
+          {:none, :none} -> :none
+          {:none, r} -> r
+          {r, :none} -> r
+          {r1, r2} -> intersection(r1, r2)
+        end
 
-  # renders as  pid()
-  defp pid_to_quoted(:term, _opts), do: [{:pid, [], []}]
-
-  defp pid_to_quoted(msg_type, opts) do
-    # renders as  pid(integer())
-    [{:pid, [], [to_quoted(msg_type, opts)]}]
+      {msg, ret}
+    end
   end
 
-  defp pid_difference(t1, t2) do
-    if subtype?(t1, t2), do: 0, else: t1
+  defp pid_empty?({msg_type, _ret_type}), do: empty?(msg_type)
+
+  # renders as  pid()
+  defp pid_to_quoted({:term, :none}, _opts), do: [{:pid, [], []}]
+
+  # renders as  pid(integer())
+  defp pid_to_quoted({msg_type, :none}, opts),
+    do: [{:pid, [], [to_quoted(msg_type, opts)]}]
+
+  # renders as  pid(integer(), atom())
+  defp pid_to_quoted({msg_type, ret_type}, opts),
+    do: [{:pid, [], [to_quoted(msg_type, opts), to_quoted(ret_type, opts)]}]
+
+  defp pid_difference({msg1, ret1}, {msg2, _ret2}) do
+    if subtype?(msg1, msg2), do: 0, else: {msg1, ret1}
   end
 
   # Returns :none if no pid component, :term if untyped pid(),
   # or the message descr if typed pid(T).
-  def pid_message_type(%{pid: t}), do: t
+  def pid_message_type(%{pid: {msg_type, _ret_type}}), do: msg_type
   # term() contains pid()
   def pid_message_type(:term), do: :term
   def pid_message_type(%{dynamic: :term}), do: :term
@@ -2472,6 +2502,23 @@ defmodule Module.Types.Descr do
   end
 
   def pid_message_type(_), do: :none
+  #TODO: If not used, could be removed
+  # Returns :none if no pid component or no return type tracked,
+  # :term if the global term type, or the return descr if typed pid(T, R).
+  def pid_return_type(%{pid: {_msg_type, ret_type}}), do: ret_type
+  # term() contains pid()
+  def pid_return_type(:term), do: :term
+  def pid_return_type(%{dynamic: :term}), do: :term
+  def pid_return_type(%{dynamic: pid_type}), do: pid_return_type(pid_type)
+
+  def pid_return_type(%{map: {:closed, fields}}) when is_map(fields) do
+    case Map.fetch(fields, :pid) do
+      {:ok, pid_type} -> pid_return_type(pid_type)
+      :error -> :none
+    end
+  end
+
+  def pid_return_type(_), do: :none
 
   ## Dynamic
   #
