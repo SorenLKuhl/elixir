@@ -2433,10 +2433,9 @@ defmodule Module.Types.Descr do
   defp pop_elem([], _key, acc), do: {false, :lists.reverse(acc)}
 
   ## Pid
-  # Contravariant akin to pekko
-  # defp pid_union(t1, t2), do: intersection(t1, t2)
-  # Covariant
   defp pid_union({msg1, ret1}, {msg2, ret2}) do
+    msg = intersection(msg1, msg2)
+
     ret =
       case {ret1, ret2} do
         {:none, :none} -> :none
@@ -2445,14 +2444,11 @@ defmodule Module.Types.Descr do
         {r1, r2} -> union(r1, r2)
       end
 
-    {union(msg1, msg2), ret}
+    {msg, ret}
   end
 
-  # Contravariant akin to pekko
-  # defp pid_intersection(t1, t2), do: union(t1, t2)
-  # Covariant
   defp pid_intersection({msg1, ret1}, {msg2, ret2}) do
-    msg = intersection(msg1, msg2)
+    msg = union(msg1, msg2)
 
     if empty?(msg) do
       0
@@ -2483,7 +2479,7 @@ defmodule Module.Types.Descr do
     do: [{:pid, [], [to_quoted(msg_type, opts), to_quoted(ret_type, opts)]}]
 
   defp pid_difference({msg1, ret1}, {msg2, _ret2}) do
-    if subtype?(msg1, msg2), do: 0, else: {msg1, ret1}
+    if subtype?(msg2, msg1), do: 0, else: {msg1, ret1}
   end
 
   # Returns :none if no pid component, :term if untyped pid(),

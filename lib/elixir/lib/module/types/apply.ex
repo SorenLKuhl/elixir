@@ -95,7 +95,7 @@ defmodule Module.Types.Apply do
   mfargs = [atom(), atom(), list(term())]
 
   send_destination =
-    pid()
+    pid(none())
     |> union(reference())
     |> union(port())
     |> union(atom())

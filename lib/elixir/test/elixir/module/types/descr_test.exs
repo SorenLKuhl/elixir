@@ -911,6 +911,20 @@ defmodule Module.Types.DescrTest do
       # A function with the wrong arity is refused
       refute subtype?(fun([none()], atom()), f)
     end
+
+    test "pid" do
+      int_pid = pid(integer())
+      num_pid = pid(number())
+
+      assert subtype?(num_pid, int_pid)
+      refute subtype?(int_pid, num_pid)
+
+      num_to_num = pid(integer(), number())
+      num_to_int = pid(number(), integer())
+
+      assert subtype?(num_to_int, num_to_num)
+      refute subtype?(num_to_num, num_to_int)
+    end
   end
 
   describe "compatible" do
