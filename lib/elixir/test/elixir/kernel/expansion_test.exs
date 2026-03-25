@@ -531,7 +531,7 @@ defmodule Kernel.ExpansionTest do
   describe "floats" do
     test "cannot be 0.0 inside match" do
       assert capture_io(:stderr, fn -> expand(quote(do: 0.0 = 0.0)) end) =~
-               "pattern matching on 0.0 is equivalent to matching only on +0.0 from Erlang/OTP 27+"
+               "pattern matching on 0.0 is equivalent to matching only on +0.0"
 
       assert {:=, [], [+0.0, +0.0]} = expand(quote(do: +0.0 = 0.0))
       assert {:=, [], [-0.0, +0.0]} = expand(quote(do: -0.0 = 0.0))
@@ -810,7 +810,7 @@ defmodule Kernel.ExpansionTest do
 
     test "in guards with macros" do
       message =
-        ~r"you must require the moduleInteger before invoking macro Integer.is_even/1 inside a guard"
+        ~r"you must require the module Integer before invoking macro Integer.is_even/1 inside a guard"
 
       assert_compile_error(message, fn ->
         expand(quote(do: fn arg when Integer.is_even(arg) -> arg end))

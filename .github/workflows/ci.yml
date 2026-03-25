@@ -26,27 +26,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          - otp_version: "29.0-rc1"
           - otp_version: "28.1"
             deterministic: true
           - otp_version: "28.1"
-            erlc_opts: "warnings_as_errors"
             docs: true
             coverage: true
           - otp_version: "27.3"
-            erlc_opts: "warnings_as_errors"
           - otp_version: "27.0"
-            erlc_opts: "warnings_as_errors"
-          - otp_version: "26.0"
           - otp_version: master
             development: true
           - otp_version: maint
             development: true
 
-    # Earlier Erlang/OTP versions ignored compiler directives
-    # when using warnings_as_errors. So we only set ERLC_OPTS
-    # from Erlang/OTP 27+.
     env:
-      ERLC_OPTS: ${{ matrix.erlc_opts || '' }}
+      ERLC_OPTS: "warnings_as_errors"
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -98,7 +92,7 @@ jobs:
 
       - name: "Upload Coverage Artifact"
         if: ${{ matrix.coverage }}
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: TestCoverage
           path: cover/*
@@ -121,9 +115,9 @@ jobs:
     strategy:
       matrix:
         otp_version:
+          - "29.0-rc1"
           - "28.1"
           - "27.3"
-          - "26.2"
 
     steps:
       - name: Configure Git
