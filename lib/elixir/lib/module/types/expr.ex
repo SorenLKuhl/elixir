@@ -775,12 +775,7 @@ defmodule Module.Types.Expr do
           context =
             if Map.has_key?(context, :receive_acc) and base_info == :receive and
                  not context.failed do
-              body_clause_type =
-                Enum.map(trees, fn {tree, _, _} ->
-                  tree
-                  |> Pattern.of_pattern_tree(stack, context)
-                  |> upper_bound()
-                end)
+              body_clause_type = Pattern.of_domain(trees, stack, context)
 
               Enum.reduce(body_clause_type, context, fn type, context ->
                 update_in(context.receive_acc, &union(&1, type))
