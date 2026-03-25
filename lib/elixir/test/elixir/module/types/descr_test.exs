@@ -913,11 +913,13 @@ defmodule Module.Types.DescrTest do
     end
 
     test "pid" do
+      term_pid = pid(term())
       int_pid = pid(integer())
       num_pid = pid(number())
 
       assert subtype?(num_pid, int_pid)
       refute subtype?(int_pid, num_pid)
+      refute subtype?(int_pid, term_pid)
 
       num_to_num = pid(integer(), number())
       num_to_int = pid(number(), integer())
