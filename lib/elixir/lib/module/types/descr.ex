@@ -55,7 +55,7 @@ defmodule Module.Types.Descr do
   @non_empty_list_top {:term, :term}
   @tuple_top {:open, []}
   @map_empty {:closed, @fields_new}
-  @pid_top {:term, :none}
+  @pid_top {%{}, :none}
 
   # The top BDD for each arity.
   @fun_bdd_top :bdd_top
@@ -2642,27 +2642,28 @@ defmodule Module.Types.Descr do
   end
 
   defp pid_intersection({msg1, ret1}, {msg2, ret2}) do
+    # Contravariant: pid(A) ∩ pid(B) = pid(A ∪ B).
+    # pid(none()) is the TOP (all pids), so this is never empty.
     msg = union(msg1, msg2)
 
-    if empty?(msg) do
-      0
-    else
-      ret =
-        case {ret1, ret2} do
-          {:none, :none} -> :none
-          {:none, r} -> r
-          {r, :none} -> r
-          {r1, r2} -> intersection(r1, r2)
-        end
+    ret =
+      case {ret1, ret2} do
+        {:none, :none} -> :none
+        {:none, r} -> r
+        {r, :none} -> r
+        {r1, r2} -> intersection(r1, r2)
+      end
 
-      {msg, ret}
-    end
+    {msg, ret}
   end
 
-  defp pid_empty?({msg_type, _ret_type}), do: empty?(msg_type)
+  # defp pid_empty?({msg_type, _ret_type}), do: empty?(msg_type)
+  defp pid_empty?(0), do: true
+  defp pid_empty?({_msg_type, _ret_type}), do: false
 
-  # renders as  pid()
-  defp pid_to_quoted({:term, :none}, _opts), do: [{:pid, [], []}]
+  # renders as  pid()  — both the sentinel :term and the top @none map render as untyped pid()
+  defp pid_to_quoted({msg_type, :none}, _opts) when msg_type == @none or msg_type == :term,
+    do: [{:pid, [], []}]
 
   # renders as  pid(integer())
   defp pid_to_quoted({msg_type, :none}, opts),
@@ -2678,7 +2679,11 @@ defmodule Module.Types.Descr do
 
   # Returns :none if no pid component, :term if untyped pid(),
   # or the message descr if typed pid(T).
-  def pid_message_type(%{pid: {msg_type, _ret_type}}), do: msg_type
+  # def pid_message_type(%{pid: {msg_type, _ret_type}}), do: msg_type
+  def pid_message_type(%{pid: {msg_type, _ret_type}}) do
+    if empty?(msg_type), do: :term, else: msg_type
+  end
+
   # term() contains pid()
   def pid_message_type(:term), do: :term
   def pid_message_type(%{dynamic: :term}), do: :term
@@ -2692,7 +2697,7 @@ defmodule Module.Types.Descr do
   end
 
   def pid_message_type(_), do: :none
-  #TODO: If not used, could be removed
+  # TODO: If not used, could be removed
   # Returns :none if no pid component or no return type tracked,
   # :term if the global term type, or the return descr if typed pid(T, R).
   def pid_return_type(%{pid: {_msg_type, ret_type}}), do: ret_type
