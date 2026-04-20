@@ -2682,14 +2682,12 @@ defmodule Module.Types.Descr do
   # or the message descr if typed pid(T).
   # def pid_message_type(%{pid: {msg_type, _ret_type}}), do: msg_type
   def pid_message_type(%{pid: {msg_type, _ret_type}}) do
-    if empty?(msg_type), do: :term, else: msg_type
+    if empty?(msg_type), do: :none, else: msg_type
   end
 
   # term() contains pid()
   def pid_message_type(:term), do: :term
   def pid_message_type(%{dynamic: :term}), do: :term
-  def pid_message_type(@none), do: @none
-  def pid_message_type(%{dynamic: @none}), do: @none
   def pid_message_type(%{dynamic: pid_type}), do: pid_message_type(pid_type)
 
   def pid_message_type(%{map: {:closed, fields}}) when is_map(fields) do

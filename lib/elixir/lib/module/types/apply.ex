@@ -905,12 +905,11 @@ defmodule Module.Types.Apply do
     # Extract the pid component from the destination type (may be a union with atom/port/ref)
     case pid_message_type(dest) do
       :none ->
-        # No pid in the destination type — fall through to normal strong arrow check
-        # remote_apply(:none, args_types, stack)
+        # pid()
         {:ok, return(dynamic(), args_types, stack)}
 
       :term ->
-        # Untyped pid() — skip check, return dynamic as before
+        # "bottom" pid type. Is this ever used?
         {:ok, return(dynamic(), args_types, stack)}
 
       msg_type ->
