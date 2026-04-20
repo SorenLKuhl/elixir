@@ -702,8 +702,7 @@ defmodule Module.Types.Expr do
 
   defp for_clause({:<<>>, _, [{:<-, meta, [left, right]}]} = expr, stack, context) do
     {right_type, context} = of_expr(right, bitstring(), expr, stack, context)
-    info = {:for, expr, dynamic()}
-    context = Pattern.of_generator(left, [], bitstring(), info, expr, stack, context)
+    context = Pattern.of_generator(left, [], bitstring(), :for, expr, stack, context)
 
     if compatible?(right_type, bitstring()) do
       context
@@ -769,8 +768,7 @@ defmodule Module.Types.Expr do
   defp with_clause({:<-, _meta, [left, right]} = expr, stack, context) do
     {pattern, guards} = extract_head([left])
     {_type, context} = of_expr(right, @pending, right, stack, context)
-    info = {:with, expr, dynamic()}
-    Pattern.of_generator(pattern, guards, dynamic(), info, expr, stack, context)
+    Pattern.of_generator(pattern, guards, dynamic(), :with, expr, stack, context)
   end
 
   defp with_clause(expr, stack, context) do
