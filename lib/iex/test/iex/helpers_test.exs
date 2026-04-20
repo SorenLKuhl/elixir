@@ -283,7 +283,7 @@ defmodule IEx.HelpersTest do
 
     test "errors if module is in-memory" do
       assert capture_iex("defmodule Foo, do: nil ; open(Foo)") =~
-               ~r"Invalid arguments for open helper:"
+               "file is not available"
     after
       cleanup_modules([Foo])
     end
@@ -312,6 +312,47 @@ defmodule IEx.HelpersTest do
         {:win32, _} -> String.replace(string, "\"", "")
         _ -> string
       end
+    end
+  end
+
+  describe "source" do
+    @describetag :requires_source
+    @example_module_source "test/test_helper.exs"
+
+    test "prints source location for Elixir module" do
+      assert capture_iex("source(HelperExampleModule)") =~
+               ~r/#{@example_module_source}:\d+$/
+    end
+
+    test "prints source location for module.function" do
+      assert capture_iex("source(HelperExampleModule.fun)") =~
+               ~r/#{@example_module_source}:\d+$/
+    end
+
+    test "prints source location for module.function/arity" do
+      assert capture_iex("source(HelperExampleModule.fun/1)") =~
+               ~r/#{@example_module_source}:\d+$/
+    end
+
+    test "errors if module is not available" do
+      assert capture_iex("source(:unknown)") ==
+               "Could not show source for :unknown, module is not available"
+    end
+
+    test "errors if module.function is not available" do
+      assert capture_iex("source(:unknown.unknown)") ==
+               "Could not show source for :unknown.unknown, module is not available"
+
+      assert capture_iex("source(:elixir.unknown)") ==
+               "Could not show source for :elixir.unknown, function/macro is not available"
+    end
+
+    test "errors if module.function/arity is not available" do
+      assert capture_iex("source(:unknown.start/10)") ==
+               "Could not show source for :unknown.start/10, module is not available"
+
+      assert capture_iex("source(:elixir.start/10)") ==
+               "Could not show source for :elixir.start/10, function/macro is not available"
     end
   end
 

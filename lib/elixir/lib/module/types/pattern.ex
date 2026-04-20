@@ -18,6 +18,7 @@ defmodule Module.Types.Pattern do
   defp empty_previous?({[], _}), do: true
   defp empty_previous?({[_ | _], _}), do: false
 
+  # Previous is always an upper bound (static), so we can use subtype?
   defp previous_subtype?(_, {[], _}), do: false
   defp previous_subtype?([], _), do: true
   defp previous_subtype?(args, {_, descr}), do: subtype?(args_to_previous(args), descr)
@@ -49,7 +50,9 @@ defmodule Module.Types.Pattern do
   end
 
   defp previous_to_string({list, _}) do
-    Enum.map_join(list, "\n    ", fn types ->
+    list
+    |> Enum.reverse()
+    |> Enum.map_join("\n    ", fn types ->
       types
       |> Enum.map_join(", ", &(&1 |> upper_bound() |> to_quoted_string()))
       |> indent(4)
@@ -189,27 +192,28 @@ defmodule Module.Types.Pattern do
       # First we check if it fails without previous, if it doesn't, check if it is redundant.
       case of_precise_head(patterns, guards, expected, init_previous(), tag, stack, original) do
         {other_trees, _, _, _, %{failed: true} = other_context} ->
-          {other_trees, previous, other_context}
+          {other_trees, args_types, previous, other_context}
 
         {other_trees, _, _, args_types, other_context} ->
           if previous_subtype?(args_types, previous) do
             warning = {:redundant, tag, expected, args_types, previous, other_context}
-            {other_trees, previous, warn(__MODULE__, warning, meta, stack, other_context)}
+            context = warn(__MODULE__, warning, meta, stack, other_context)
+            {other_trees, args_types, previous, context}
           else
-            {trees, previous, context}
+            {trees, args_types, previous, context}
           end
       end
     else
       cond do
         check_previous? and previous_subtype?(args_types, previous) ->
           warning = {:redundant, tag, expected, args_types, previous, context}
-          {trees, previous, warn(__MODULE__, warning, meta, stack, context)}
+          {trees, args_types, previous, warn(__MODULE__, warning, meta, stack, context)}
 
         precise? ->
-          {trees, concat_previous(args_types, previous), context}
+          {trees, args_types, concat_previous(args_types, previous), context}
 
         true ->
-          {trees, previous, context}
+          {trees, args_types, previous, context}
       end
     end
   end
@@ -234,7 +238,7 @@ defmodule Module.Types.Pattern do
            of_pattern_intersect(trees, 0, [], pattern_info, tag, stack, context),
          # We compute the args types before we do the intersection with previous clauses
          args_types =
-           (with [_ | _] <- previous,
+           (with false <- empty_previous?(previous),
                  {:ok, _types, context} <-
                    of_pattern_refine(types, changed, pattern_info, tag, stack, context) do
               trees_to_args_types(trees, stack, context)
@@ -261,18 +265,13 @@ defmodule Module.Types.Pattern do
   @doc """
   Computes the domain from the pattern tree and expected types.
 
-  Note we use `upper_bound` because the user of dynamic in the signature
+  Note we use `upper_bound` because the use of dynamic in the signature
   won't make a difference.
   """
-  def of_domain([{tree, expected, _pattern} | trees], stack, context) do
-    [
-      intersection(of_pattern_tree(tree, stack, context), expected) |> upper_bound()
-      | of_domain(trees, stack, context)
-    ]
-  end
-
-  def of_domain([], _stack, _context) do
-    []
+  def of_domain(trees, stack, context) do
+    Enum.map(trees, fn {tree, _, _} ->
+      tree |> of_pattern_tree(stack, context) |> upper_bound()
+    end)
   end
 
   defp of_pattern_args_zip(
@@ -323,7 +322,9 @@ defmodule Module.Types.Pattern do
   @doc """
   Handles matches in generators.
   """
-  def of_generator(pattern, guards, expected, tag, expr, stack, %{vars: vars} = context) do
+  def of_generator(pattern, guards, expected, op, expr, stack, %{vars: vars} = context)
+      when is_atom(op) do
+    tag = {op, expr, expected}
     context = init_pattern_info(context, [])
 
     {tree, _precise?, context} =
@@ -805,12 +806,7 @@ defmodule Module.Types.Pattern do
     end
   end
 
-  # _
-  defp of_pattern({:_, _meta, _var_context}, _path, _stack, context) do
-    {term(), true, context}
-  end
-
-  # var
+  # var (includes underscores)
   defp of_pattern({name, meta, ctx} = var, path, _stack, context)
        when is_atom(name) and is_atom(ctx) do
     version = Keyword.fetch!(meta, :version)
@@ -1261,12 +1257,12 @@ defmodule Module.Types.Pattern do
 
   defp of_remote(fun, _args, call, expected, stack, context)
        when fun in [:and, :or, :andalso, :orelse] do
-    {both_domain, abort_domain, always_rhs?} =
+    {boolean, abort_domain, always_rhs?} =
       case fun do
-        :andalso -> {@atom_true, @atom_false, false}
-        :orelse -> {@atom_false, @atom_true, false}
-        :and -> {@atom_true, @atom_false, true}
-        :or -> {@atom_false, @atom_true, true}
+        :andalso -> {true, @atom_false, false}
+        :orelse -> {false, @atom_true, false}
+        :and -> {true, @atom_false, true}
+        :or -> {false, @atom_true, true}
       end
 
     # If we have multiple operations in a row,
@@ -1282,8 +1278,8 @@ defmodule Module.Types.Pattern do
     # only be true if both clauses are executed, so we know the first
     # argument has to be true and the second has to be expected.
     cond do
-      subtype?(expected, both_domain) ->
-        of_logical_all([left | right], true, both_domain, abort_domain, stack, context)
+      is_nil(context.pattern_info) or booleaness(expected) == {boolean, :always} ->
+        of_logical_all([left | right], true, expected, abort_domain, stack, context)
 
       right == [] ->
         of_guard(left, expected, left, stack, context)

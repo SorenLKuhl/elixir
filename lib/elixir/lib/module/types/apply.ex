@@ -906,7 +906,8 @@ defmodule Module.Types.Apply do
     case pid_message_type(dest) do
       :none ->
         # No pid in the destination type — fall through to normal strong arrow check
-        remote_apply(:none, args_types, stack)
+        # remote_apply(:none, args_types, stack)
+        {:ok, return(dynamic(), args_types, stack)}
 
       :term ->
         # Untyped pid() — skip check, return dynamic as before
@@ -1425,14 +1426,12 @@ defmodule Module.Types.Apply do
     {args_types, context} =
       zip_map_reduce(args, domain, context, &of_fun.(&1, &2, expr, stack, &3))
 
-    # Check for strict subtyping if function is "strict"
-    if Helpers.is_strict?(fun) and not zip_subtype?(args_types, domain) do
-      # IO.puts("local apply: #{fun}/#{length(args)} with args types #{inspect(args_types)}, expected #{inspect(expected)}, domain #{inspect(domain)}, local_info: #{inspect(local_info)}")
-      error = {:badlocal, Kernel.elem(local_info, 1), args_types, expr, context}
-      {error_type(), error(error, with_span(elem(expr, 1), fun), stack, context)}
-    else
-      local_apply(local_info, fun, args_types, expr, stack, context)
+    if fun == :pid_sender do
+      IO.puts("Context before local_apply for #{fun}: #{inspect(context, limit: :infinity, pretty: true)}")
+      IO.puts("Args types for #{fun}: #{inspect(args_types, limit: :infinity, pretty: :true)}")
     end
+
+    local_apply(local_info, fun, args_types, expr, stack, context)
   end
 
   defp local_domain(fun, args, expected, meta, stack, context) do

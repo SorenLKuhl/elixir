@@ -12,7 +12,18 @@ defmodule ExUnit.CLIFormatter do
   ## Callbacks
 
   def init(opts) do
-    IO.puts("Running ExUnit with seed: #{opts[:seed]}, max_cases: #{opts[:max_cases]}")
+    remaining =
+      if opts[:repeat_until_failure] > 0 do
+        ", remaining_runs: #{opts[:remaining_runs]}"
+      else
+        ""
+      end
+
+    IO.puts([
+      "Running ExUnit with seed: #{opts[:seed]}, max_cases: #{opts[:max_cases]}",
+      remaining
+    ])
+
     print_filters(opts, :exclude)
     print_filters(opts, :include)
     IO.puts("")
@@ -240,7 +251,7 @@ defmodule ExUnit.CLIFormatter do
   end
 
   defp trace_test_started(test) do
-    String.replace("  * #{test.name}", "\n", " ")
+    String.replace("  * #{test.description}", "\n", " ")
   end
 
   defp trace_test_result(test) do
@@ -256,7 +267,7 @@ defmodule ExUnit.CLIFormatter do
   end
 
   defp trace_aborted(%ExUnit.Test{} = test) do
-    "* #{test.name} [#{trace_test_file_line(test)}]"
+    "* #{test.description} [#{trace_test_file_line(test)}]"
   end
 
   defp trace_aborted(%ExUnit.TestModule{name: name, file: file}) do
