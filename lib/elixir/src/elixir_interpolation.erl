@@ -81,7 +81,7 @@ extract([$\\ | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last) ->
 %% Catch all clause
 
 extract([Char1, Char2 | Rest], Buffer, Output, Line, Column, Scope, Interpol, Last)
-    when Char1 =< 255, Char2 =< 255 ->
+    when Char1 =< 255, Char2 =< 255, not (?break(Char1)) ->
   extract([Char2 | Rest], [Char1 | Buffer], Output, Line, Column + 1, Scope, Interpol, Last);
 
 extract(Rest, Buffer, Output, Line, Column, Scope, Interpol, Last) ->

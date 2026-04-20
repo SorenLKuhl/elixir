@@ -85,7 +85,7 @@ defmodule Module.Types.IntegrationTest do
              ]
     end
 
-    test "writes exports with inferred map types" do
+    test "writes exports with inferred map return types" do
       files = %{
         "a.ex" => """
         defmodule A do
@@ -163,7 +163,7 @@ defmodule Module.Types.IntegrationTest do
                )
     end
 
-    test "writes exports with inferred function types" do
+    test "writes exports with inferred function return types" do
       files = %{
         "a.ex" => """
         defmodule A do
@@ -191,6 +191,40 @@ defmodule Module.Types.IntegrationTest do
                  {[non_empty_list(term(), term())], dynamic(atom([:list]))}
                ])
              )
+    end
+
+    test "writes exports with inferred domain types" do
+      files = %{
+        "a.ex" => """
+        defmodule A do
+          # Test that we don't return differences on catch-all
+          def foo(%{foo: 123}, {:ok, _}), do: 1
+          def foo(%{}, {_, _}), do: 2
+
+          def bar(%{foo: 123}, {:ok, _}), do: 1
+          def bar(map, tuple), do: {map, tuple}
+
+          # Notice that we will return a broader domain than the inferred types
+          # but because the domain is only used for refining reverse arrows,
+          # type checking will fail if %{foo: not integer()} is given
+          def baz(%{foo: var}), do: Integer.to_string(var)
+          def baz(%{}), do: :error
+        end
+        """
+      }
+
+      modules = compile_modules(files)
+      exports = read_chunk(modules[A]).exports |> Map.new()
+
+      domain = fn name, arity ->
+        pair = {name, arity}
+        %{^pair => %{sig: {:infer, domain, _}}} = exports
+        domain
+      end
+
+      assert domain.(:foo, 2) == [open_map(), tuple([term(), term()])]
+      assert domain.(:bar, 2) == [term(), term()]
+      assert domain.(:baz, 1) == [open_map()]
     end
 
     test "writes exports for implementations" do
@@ -338,8 +372,8 @@ defmodule Module.Types.IntegrationTest do
 
             previous clauses have already matched on the following types:
 
-                term(), integer()
                 integer(), term()
+                term(), integer()
 
             │
           4 │   def foo(x, y) when is_integer(x) and is_integer(y), do: :three
@@ -416,7 +450,7 @@ defmodule Module.Types.IntegrationTest do
 
       warnings = [
         """
-            warning: this clause of defp private/1 is never used (or it will always fail when invoked)
+            warning: this clause of defp private/1 is never used (or it will always fail/warn when invoked)
             │
           6 │   defp private(nil), do: nil
             │        ~
@@ -424,7 +458,7 @@ defmodule Module.Types.IntegrationTest do
             └─ a.ex:6:8: A.private/1
         """,
         """
-            warning: this clause of defp private/1 is never used (or it will always fail when invoked)
+            warning: this clause of defp private/1 is never used (or it will always fail/warn when invoked)
             │
           7 │   defp private("foo"), do: "foo"
             │        ~
@@ -432,7 +466,7 @@ defmodule Module.Types.IntegrationTest do
             └─ a.ex:7:8: A.private/1
         """,
         """
-            warning: this clause of defp private/1 is never used (or it will always fail when invoked)
+            warning: this clause of defp private/1 is never used (or it will always fail/warn when invoked)
             │
          10 │   defp private("bar"), do: "bar"
             │        ~
@@ -928,7 +962,7 @@ defmodule Module.Types.IntegrationTest do
       assert_no_warnings(files)
     end
 
-    test "redundant clause checking of mixed open and closed maps" do
+    test "redundant clause checking of mixed open and closed maps (1)" do
       files = %{
         "mixed_open_closed_maps.ex" => """
         defmodule MixedOpenClosedMaps do
@@ -976,6 +1010,59 @@ defmodule Module.Types.IntegrationTest do
           # Having the closed map and the struct overlap on a key is important
           def render(%SValue{}), do: :ok
           def render(%{value: value}), do: value
+        end
+        """
+      }
+
+      assert_no_warnings(files)
+    end
+
+    test "redundant clause checking of mixed open and closed maps (2)" do
+      files = %{
+        "mixed_open_closed_maps.ex" => """
+        defmodule MixedOpenClose.Roles do
+          defstruct engineering_admin: false,
+                    admin: false,
+                    support: false,
+                    service_desk: false,
+                    sales: false
+        end
+
+        defmodule MixedOpenClose.User do
+          defstruct roles: %MixedOpenClose.Roles{}
+        end
+
+        defmodule MixedOpenClose.Policy do
+          alias MixedOpenClose.{User, Roles}
+
+          @admin_actions [
+            :access,
+            :edit,
+            :manage_roles,
+            :global_search,
+            :get_users_with_roles,
+            :deactivate,
+            :reactivate,
+            :confirm_email,
+            :soft_delete
+          ]
+
+          def can?(%User{roles: %Roles{support: true}}, _a, action)
+              when action in [:global_search, :confirm_email, :get_users_with_roles], do: true
+
+          def can?(%User{roles: %Roles{service_desk: true}}, _a, action)
+              when action in [:global_search, :confirm_email], do: true
+
+          def can?(%User{roles: %Roles{sales: true}}, _a, action)
+              when action in [:edit, :confirm_email], do: true
+
+          def can?(%User{roles: roles}, _a, action)
+              when action in @admin_actions and (roles.admin == true or roles.engineering_admin == true),
+              do: true
+
+          def can?(user, %URI{} = uri, action), do: can?(user, uri, action)
+
+          def can?(_a, _b, _c), do: false
         end
         """
       }

@@ -982,6 +982,8 @@ defmodule Module.Types.Descr do
   domain of a function. It is used to refine dynamic types
   as we traverse the program.
   """
+  def compatible_intersection(other, :term), do: {:ok, remove_optional(other)}
+
   def compatible_intersection(left, right) do
     {left_dynamic, left_static} = pop_dynamic(left)
 
@@ -1367,8 +1369,8 @@ defmodule Module.Types.Descr do
   Applies a function type to a list of argument types.
 
   Returns `{:ok, result}` if the application is valid
-  or one `{:badarg, to_succeed_domain}`, `:badfun`,
-  `{:badarity, arities}` if not.
+  or one `{:badarg, to_succeed_domain, empty?}`, `:badfun`,
+  or `{:badarity, arities}`.
 
   Note the domain returned by `:badarg` is not the strong
   domain, but the domain that must be satisfied for the
@@ -1452,61 +1454,62 @@ defmodule Module.Types.Descr do
     static? = fun_dynamic == nil and Enum.all?(arguments, fn arg -> not gradual?(arg) end)
     arity = length(arguments)
 
-    with {:ok, domain, static_arrows, dynamic_arrows} <-
-           fun_normalize_both(fun_static, fun_dynamic, arity) do
-      cond do
-        Enum.any?(arguments, &empty?/1) ->
-          {:badarg, domain_to_flat_args(domain, arity)}
+    if Enum.any?(arguments, &empty?/1) do
+      {:badarg, arguments, true}
+    else
+      with {:ok, domain, static_arrows, dynamic_arrows} <-
+             fun_normalize_both(fun_static, fun_dynamic, arity) do
+        cond do
+          # The domain here is the extended gradual domain computed by
+          # fun_normalize_both/3. If the argument does not satisfy it, we
+          # check compatibility before rejecting.
+          #
+          # Compatibility has two cases to avoid a degenerate situation.
+          # If the argument is purely dynamic (e.g. dynamic() and bool()),
+          # its static part (lower bound) is none(). We do not want
+          # none() <= domain to trivially succeed, because that would mean
+          # "a diverging argument is accepted by any function", which is true but
+          # useless. So when the static part is empty, we instead check
+          # that the upper bound overlaps with the domain. When the static
+          # part is non-empty, we check it is a subtype of the domain.
+          not subtype?(args_domain, domain) ->
+            if static? or not compatible?(args_domain, domain),
+              do: {:badarg, domain_to_flat_args(domain, arity), false},
+              else: {:ok, dynamic()}
 
-        # The domain here is the extended gradual domain computed by
-        # fun_normalize_both/3. If the argument does not satisfy it, we
-        # check compatibility before rejecting.
-        #
-        # Compatibility has two cases to avoid a degenerate situation.
-        # If the argument is purely dynamic (e.g. dynamic() and bool()),
-        # its static part (lower bound) is none(). We do not want
-        # none() <= domain to trivially succeed, because that would mean
-        # "a diverging argument is accepted by any function", which is true but
-        # useless. So when the static part is empty, we instead check
-        # that the upper bound overlaps with the domain. When the static
-        # part is non-empty, we check it is a subtype of the domain.
-        not subtype?(args_domain, domain) ->
-          if static? or not compatible?(args_domain, domain),
-            do: {:badarg, domain_to_flat_args(domain, arity)},
-            else: {:ok, dynamic()}
+          static? ->
+            {:ok, fun_apply_static(arguments, static_arrows)}
 
-        static? ->
-          {:ok, fun_apply_static(arguments, static_arrows)}
+          static_arrows == [] ->
+            # Purely dynamic function (e.g. dynamic() and (integer() -> integer())).
+            # There are no static arrows, so the general mixed formula simplifies:
+            # applying none() to anything yields none(), so the static branch
+            # vanishes and only the dynamic branch remains.
+            # The result is wrapped in dynamic(), so it is safe regardless of argument precision.
+            # If the upper-bounded arguments escape the domain, fun_apply_static returns term(),
+            # and dynamic(term()) = dynamic(), which brings back to the compatible case.
+            arguments = Enum.map(arguments, &upper_bound/1)
+            {:ok, dynamic(fun_apply_static(arguments, dynamic_arrows))}
 
-        static_arrows == [] ->
-          # Purely dynamic function (e.g. dynamic() and (integer() -> integer())).
-          # There are no static arrows, so the general mixed formula simplifies:
-          # applying none() to anything yields none(), so the static branch
-          # vanishes and only the dynamic branch remains.
-          # The result is wrapped in dynamic(), so it is safe regardless of argument precision.
-          # If the upper-bounded arguments escape the domain, fun_apply_static returns term(),
-          # and dynamic(term()) = dynamic(), which brings back to the compatible case.
-          arguments = Enum.map(arguments, &upper_bound/1)
-          {:ok, dynamic(fun_apply_static(arguments, dynamic_arrows))}
+          true ->
+            # Mixed case: union of the static and dynamic results.
+            # static_arrows (lower materialization) contain only arrows that are
+            # guaranteed to exist at runtime. Static guarantees about the result
+            # come from these alone.
+            # dynamic_arrows (upper materialization) include dynamically uncertain
+            # arrows, so their result is wrapped in dynamic().
+            # We use upper_bound on the arguments for both branches. This is sound
+            # because the dynamic branch wraps its result in dynamic().
+            # It is more strict and informative than using lower_bound in the static part,
+            # as it amounts to assuming the worst case of using the statically present arrows.
+            arguments = Enum.map(arguments, &upper_bound/1)
 
-        true ->
-          # Mixed case: union of the static and dynamic results.
-          # static_arrows (lower materialization) contain only arrows that are
-          # guaranteed to exist at runtime. Static guarantees about the result
-          # come from these alone.
-          # dynamic_arrows (upper materialization) include dynamically uncertain
-          # arrows, so their result is wrapped in dynamic().
-          # We use upper_bound on the arguments for both branches. This is sound
-          # because the dynamic branch wraps its result in dynamic().
-          # It is more strict and informative than using lower_bound in the static part,
-          # as it amounts to assuming the worst case of using the statically present arrows.
-          arguments = Enum.map(arguments, &upper_bound/1)
-
-          {:ok,
-           union(
-             fun_apply_static(arguments, static_arrows),
-             dynamic(fun_apply_static(arguments, dynamic_arrows))
-           )}
+            {:ok,
+             union(
+               fun_apply_static(arguments, static_arrows),
+               dynamic(fun_apply_static(arguments, dynamic_arrows))
+             )}
+        end
       end
     end
   end
@@ -1819,7 +1822,7 @@ defmodule Module.Types.Descr do
           cache = Map.put(cache, cache_key, false)
           {false, cache}
         else
-          {_index, result2, cache} =
+          {_index, result, cache} =
             Enum.reduce_while(arguments, {0, true, cache}, fn
               type, {index, acc_result, acc_cache} ->
                 {new_result, new_cache} =
@@ -1834,7 +1837,6 @@ defmodule Module.Types.Descr do
                 end
             end)
 
-          result = result1 and result2
           cache = Map.put(cache, cache_key, result)
           {result, cache}
         end
@@ -2961,6 +2963,12 @@ defmodule Module.Types.Descr do
     end
   end
 
+  defp map_union(bdd_leaf(:open, fields) = leaf, _) when is_fields_empty(fields),
+    do: leaf
+
+  defp map_union(_, bdd_leaf(:open, fields) = leaf) when is_fields_empty(fields),
+    do: leaf
+
   defp map_union(bdd_leaf(tag1, fields1), bdd_leaf(tag2, fields2)) do
     case maybe_optimize_map_union(tag1, fields1, tag2, fields2) do
       {tag, fields} -> bdd_leaf(tag, fields)
@@ -3120,49 +3128,7 @@ defmodule Module.Types.Descr do
 
   defp map_intersection(bdd_leaf(:open, []), bdd), do: bdd
   defp map_intersection(bdd, bdd_leaf(:open, [])), do: bdd
-  defp map_intersection(bdd1, bdd2), do: map_bdd_intersection(bdd1, bdd2)
-
-  # A variant of bdd_intersection/3 that only continues if the maps are closed
-  # or both sides are leafs.
-  #
-  # This is necessary because the intersection of open maps end-up accumulating
-  # fields and it is unlikely to eliminate, which would lead to explosions.
-  # However, note this optimization only works because closed nodes come first
-  # in the BDD representation. If that was not the case, open nodes would come
-  # first and this optimization would not happen if they were mixed.
-  defp map_bdd_intersection(bdd_leaf(_, _) = leaf1, bdd_leaf(_, _) = leaf2) do
-    map_leaf_intersection(leaf1, leaf2)
-  end
-
-  defp map_bdd_intersection(bdd_leaf(:closed, _) = leaf, bdd) do
-    bdd_leaf_intersection(leaf, bdd, &map_leaf_intersection/2)
-  end
-
-  defp map_bdd_intersection(bdd, bdd_leaf(:closed, _) = leaf) do
-    bdd_leaf_intersection(leaf, bdd, &map_leaf_intersection/2)
-  end
-
-  defp map_bdd_intersection({bdd_leaf(:closed, _) = leaf, :bdd_top, u, d}, bdd) do
-    bdd_leaf_intersection(leaf, bdd, &map_leaf_intersection/2)
-    |> bdd_union(map_bdd_intersection(u, bdd))
-    |> case do
-      result when d == :bdd_bot -> result
-      result -> bdd_union(result, bdd_intersection(bdd, {leaf, :bdd_bot, :bdd_bot, d}))
-    end
-  end
-
-  defp map_bdd_intersection(bdd, {bdd_leaf(:closed, _) = leaf, :bdd_top, u, d}) do
-    bdd_leaf_intersection(leaf, bdd, &map_leaf_intersection/2)
-    |> bdd_union(map_bdd_intersection(u, bdd))
-    |> case do
-      result when d == :bdd_bot -> result
-      result -> bdd_union(result, bdd_intersection(bdd, {leaf, :bdd_bot, :bdd_bot, d}))
-    end
-  end
-
-  defp map_bdd_intersection(bdd1, bdd2) do
-    bdd_intersection(bdd1, bdd2)
-  end
+  defp map_intersection(bdd1, bdd2), do: bdd_intersection(bdd1, bdd2, &map_leaf_intersection/2)
 
   defp map_leaf_intersection(bdd_leaf(tag1, fields1), bdd_leaf(tag2, fields2)) do
     try do
@@ -3175,6 +3141,9 @@ defmodule Module.Types.Descr do
 
   defp map_difference(_, bdd_leaf(:open, [])),
     do: :bdd_bot
+
+  defp map_difference(bdd_leaf(:open, []), {_, _, _, _} = bdd2),
+    do: bdd_negation(bdd2)
 
   defp map_difference(bdd1, bdd2),
     do: bdd_difference(bdd1, bdd2, &map_leaf_difference/3)
@@ -3859,7 +3828,7 @@ defmodule Module.Types.Descr do
         # If any of required or optional domains are satisfied, then we compute the
         # initial return type. `map_update_keys_static` will then union into the
         # computed type below, using the original bdd/dnf, not the one with updated domains.
-        descr = map_update_put_domains(bdd, domains, type_fun)
+        descr = map_update_put_domains(bdd, domains, type_fun, force?)
         {remove_optional(value), descr, errors, true}
       else
         {remove_optional(value), none(), errors, false}
@@ -4012,31 +3981,42 @@ defmodule Module.Types.Descr do
     :found_key -> true
   end
 
+  # For each domain key, check if it exists in the map DNF and classify it
+  # as valid (matched) or invalid (missing). Accumulates the value type if require_type? is set.
+  # Returns {found?, valid_domains, invalid_domains, accumulated_value_type},
+  # where found? tracks whether at least one domain key was matched in the map.
   defp map_update_get_domains(dnf, domain_keys, acc, require_type?, any_atom_key) do
     Enum.reduce(domain_keys, {false, [], [], acc}, fn domain_key, {found?, valid, invalid, acc} ->
+      # Get the value type for this domain key, excluding optional entries
       value = map_get_domain_no_optional(dnf, domain_key, none())
 
       cond do
+        # Atom domains are special: we also check for individually named atom keys
         domain_key == :atom ->
           atom_acc = any_atom_key.()
 
           cond do
+            # Domain has a direct match: valid, union both atom keys and domain value
             not empty?(value) ->
               acc = if require_type?, do: union(union(atom_acc, acc), value), else: acc
               {true, [:atom | valid], invalid, acc}
 
+            # No direct match, but individual atom keys exist: found but domain is invalid
             not empty?(atom_acc) ->
               acc = if require_type?, do: union(atom_acc, acc), else: acc
               {true, valid, [:atom | invalid], acc}
 
+            # No match at all
             true ->
               {found?, valid, [:atom | invalid], acc}
           end
 
+        # Non-atom domain key has a match: mark as valid
         not empty?(value) ->
           acc = if require_type?, do: union(acc, value), else: acc
           {true, [domain_key | valid], invalid, acc}
 
+        # Non-atom domain key not found: mark as invalid
         true ->
           {found?, valid, [domain_key | invalid], acc}
       end
@@ -4066,24 +4046,29 @@ defmodule Module.Types.Descr do
   # But that would not be helpful, as we can't distinguish between these two
   # in Elixir code. It only makes sense to build the union for domain keys
   # that do not exist.
-  defp map_update_put_domains(bdd, [], _type_fun), do: %{map: bdd}
+  defp map_update_put_domains(bdd, [], _type_fun, _force?), do: %{map: bdd}
 
-  defp map_update_put_domains(bdd, domain_keys, type_fun) do
+  defp map_update_put_domains(bdd, domain_keys, type_fun, force?) do
     bdd =
       bdd_map(bdd, fn {tag, fields} ->
-        {map_update_put_domain(tag, domain_keys, type_fun), fields}
+        {map_update_put_domain(tag, domain_keys, type_fun, force?), fields}
       end)
 
     %{map: bdd}
   end
 
-  defp map_update_put_domain(tag_or_domains, domain_keys, type_fun) do
+  defp map_update_put_domain(tag_or_domains, domain_keys, type_fun, force?) do
     case tag_or_domains do
       :open ->
         :open
 
       :closed ->
-        fields_from_keys(domain_keys, if_set(type_fun.(true, none())))
+        # Non-forced updates must not invoke the callback on absent branches:
+        # the callback may itself typecheck a function application, and
+        # applying it to `none()` will raise undue warnings.
+        if force?,
+          do: fields_from_keys(domain_keys, if_set(type_fun.(true, none()))),
+          else: :closed
 
       # Note: domain_keys may contain duplicates, so we cannot
       # do a side-by-side traversal here.
@@ -4094,7 +4079,10 @@ defmodule Module.Types.Descr do
               fields_store(domain_key, union(value, type_fun.(true, remove_optional(value))), acc)
 
             :error ->
-              fields_store(domain_key, if_set(type_fun.(true, none())), acc)
+              # Likewise, only forced updates may synthesize missing domain keys.
+              if force?,
+                do: fields_store(domain_key, if_set(type_fun.(true, none())), acc),
+                else: acc
           end
         end)
     end
@@ -4171,7 +4159,7 @@ defmodule Module.Types.Descr do
     descr =
       case required_domains ++ optional_domains do
         [] -> none()
-        domains -> map_update_put_domains(bdd, domains, type_fun)
+        domains -> map_update_put_domains(bdd, domains, type_fun, true)
       end
 
     dnf = map_bdd_to_dnf_with_empty(bdd)
@@ -5075,10 +5063,10 @@ defmodule Module.Types.Descr do
     end
   end
 
-  defp tuple_difference(bdd_leaf(:open, []), bdd_leaf(:open, [])),
+  defp tuple_difference(_, bdd_leaf(:open, [])),
     do: :bdd_bot
 
-  defp tuple_difference(bdd_leaf(:open, []), bdd2),
+  defp tuple_difference(bdd_leaf(:open, []), {_, _, _, _} = bdd2),
     do: bdd_negation(bdd2)
 
   defp tuple_difference(bdd1, bdd2),
@@ -5198,10 +5186,8 @@ defmodule Module.Types.Descr do
          zip_empty_intersection?(elements, neg_elements) do
       [{tag, elements}]
     else
-      tuple_dnf_union(
-        tuple_elim_size(n, m, tag, elements, neg_tag),
+      tuple_elim_size(n, m, tag, elements, neg_tag) ++
         tuple_elim_content([], tag, elements, neg_elements)
-      )
     end
   end
 
@@ -5279,18 +5265,11 @@ defmodule Module.Types.Descr do
     end)
   end
 
-  # Prefer the smaller on the left
-  defp tuple_dnf_union(dnf1, dnf2) do
-    # Union of tuple DNFs is just concatenation,
-    # but we do our best to remove duplicates.
-    with [tuple1] <- dnf1,
-         [tuple2] <- dnf2,
-         optimized when optimized != nil <- maybe_optimize_tuple_union(tuple1, tuple2) do
-      [optimized]
-    else
-      _ -> dnf1 ++ (dnf2 -- dnf1)
-    end
-  end
+  defp tuple_union(bdd_leaf(:open, fields) = leaf, _) when is_fields_empty(fields),
+    do: leaf
+
+  defp tuple_union(_, bdd_leaf(:open, fields) = leaf) when is_fields_empty(fields),
+    do: leaf
 
   defp tuple_union(
          bdd_leaf(tag1, elements1) = tuple1,
@@ -5385,23 +5364,17 @@ defmodule Module.Types.Descr do
   end
 
   # Transforms a bdd into a union of tuples with no negations.
-  # Note: it is important to compose the results with
-  # tuple_dnf_union/2 to avoid duplicates
   defp tuple_bdd_to_dnf_no_negations(bdd) do
     bdd_to_dnf(bdd)
-    |> Enum.reduce([], fn {pos, negs}, acc ->
+    |> Enum.flat_map(fn {pos, negs} ->
       case non_empty_tuple_literals_intersection(pos) do
-        :empty ->
-          acc
-
-        {tag, elements} ->
-          if tuple_line_empty?(tag, elements, negs) do
-            acc
-          else
-            tuple_eliminate_negations(tag, elements, negs) |> tuple_dnf_union(acc)
-          end
+        :empty -> []
+        {tag, elements} -> tuple_eliminate_negations(tag, elements, negs)
       end
     end)
+    # We want to avoid each_singleton? from failing,
+    # so we remove contiguous duplicates (cheaper than uniq)
+    |> Enum.dedup()
   end
 
   defp tuple_bdd_to_dnf_with_negations(bdd) do
@@ -5828,6 +5801,17 @@ defmodule Module.Types.Descr do
   defp tuple_insert_static(descr, index, type) do
     Map.update!(descr, :tuple, fn bdd ->
       bdd_map(bdd, fn {tag, elements} ->
+        # If the tuple is open, then we want List.insert_at to put the new element at the correct
+        # index, which requires filling the tuple with `term()` values first.
+        # Closed tuples of an incorrect size will be ignored (they are cancelled by the earlier
+        # intersection with `tuple_of_size_at_least`).
+        elements =
+          if tag == :open and length(elements) < index do
+            tuple_fill(elements, index)
+          else
+            elements
+          end
+
         {tag, List.insert_at(elements, index, type)}
       end)
     end)
@@ -5947,7 +5931,7 @@ defmodule Module.Types.Descr do
             end
 
           {:eq, _, {lit, c2, u2, _d2}} ->
-            {lit, bdd_negation(bdd_union(c2, u2)), :bdd_bot, :bdd_bot}
+            {lit, bdd_negation_union(c2, u2), :bdd_bot, :bdd_bot}
 
           {:eq, {lit, _c1, u1, d1}, _} ->
             {lit, :bdd_bot, :bdd_bot, bdd_union(d1, u1)}
@@ -5968,6 +5952,12 @@ defmodule Module.Types.Descr do
 
   defp bdd_difference_union(i, u1, u2),
     do: bdd_difference(i, bdd_union(u1, u2))
+
+  # We avoid bdd_negation(bdd_union(u1, u2)) because the negation
+  # would spread the unions across constrained and dual parts anyway.
+  defp bdd_negation_union(u1, u2) do
+    bdd_intersection(bdd_negation(u1), bdd_negation(u2))
+  end
 
   ## Optimize differences
 
@@ -6167,88 +6157,83 @@ defmodule Module.Types.Descr do
 
   # Intersections are great because they allow us to cut down
   # the number of nodes in the tree. So whenever we have a leaf,
-  # we actually propagate it throughout the whole tree, cutting
-  # down nodes.
-  defp bdd_intersection(bdd_leaf(_, _) = leaf, bdd, leaf_intersection) do
-    bdd_leaf_intersection(leaf, bdd, leaf_intersection)
+  # we propagate it throughout the whole tree, cutting down nodes.
+  defp bdd_intersection(bdd_leaf(_, _) = leaf1, bdd_leaf(_, _) = leaf2, leaf_intersection) do
+    leaf_intersection.(leaf1, leaf2)
   end
 
-  defp bdd_intersection(bdd, bdd_leaf(_, _) = leaf, leaf_intersection) do
-    bdd_leaf_intersection(leaf, bdd, leaf_intersection)
+  defp bdd_intersection(bdd, bdd_leaf(tag, _) = leaf, leaf_intersection) when tag != :open do
+    bdd_non_open_leaf_intersection(leaf, bdd, leaf_intersection)
   end
 
-  # Take two BDDs, B1 = {a1, C1, U2, D2} and B2.
-  # We can treat a1 as a leaf if C1 = :bdd_top.
-  # Then we have:
-  #
-  #     ((a1 and C1) or U2 or (not a1 and D2)) and B2
-  #
-  # Which is equivalent to:
-  #
-  #     (a1 and B2) or (B2 and U2) or (B2 and not a1 and D2)
-  defp bdd_intersection({leaf, :bdd_top, u, d}, bdd, leaf_intersection) do
-    bdd_leaf_intersection(leaf, bdd, leaf_intersection)
-    |> bdd_union(bdd_intersection(u, bdd, leaf_intersection))
-    |> case do
-      result when d == :bdd_bot -> result
-      result -> bdd_union(result, bdd_intersection(bdd, {leaf, :bdd_bot, :bdd_bot, d}))
-    end
-  end
-
-  defp bdd_intersection(bdd, {leaf, :bdd_top, u, d}, leaf_intersection) do
-    bdd_leaf_intersection(leaf, bdd, leaf_intersection)
-    |> bdd_union(bdd_intersection(u, bdd, leaf_intersection))
-    |> case do
-      result when d == :bdd_bot -> result
-      result -> bdd_union(result, bdd_intersection(bdd, {leaf, :bdd_bot, :bdd_bot, d}))
-    end
+  defp bdd_intersection(bdd_leaf(tag, _) = leaf, bdd, leaf_intersection) when tag != :open do
+    bdd_non_open_leaf_intersection(leaf, bdd, leaf_intersection)
   end
 
   defp bdd_intersection(bdd1, bdd2, _leaf_intersection) do
     bdd_intersection(bdd1, bdd2)
   end
 
-  defp bdd_leaf_intersection(leaf, bdd, intersection) do
-    case bdd do
-      :bdd_top ->
+  # Take two BDDs, B1 = {a1, C1, U1, D1} and B2 = a2.
+  #
+  # We have:
+  #
+  #     ((a1 and C1) or U1 or (not a1 and D1)) and a2
+  #     (a1 and a2 and C1) or (a2 and U1) or (a2 and not a1 and D1)
+  #
+  # When C1 = :bdd_top, (a1 and a2) or (a2 and U2) or (a2 and not a1 and D2)
+  # When C2 = :bdd_bot, (a2 and U2) or (a2 and not a1 and D2)
+  defp bdd_non_open_leaf_intersection(leaf1, bdd_leaf(_, _) = leaf2, leaf_intersection) do
+    leaf_intersection.(leaf1, leaf2)
+  end
+
+  defp bdd_non_open_leaf_intersection(leaf, {a, :bdd_top, u, d}, leaf_intersection) do
+    leaf_intersection.(a, leaf)
+    |> bdd_union(bdd_non_open_leaf_intersection(leaf, u, leaf_intersection))
+    |> case do
+      result when d == :bdd_bot ->
+        result
+
+      result ->
         leaf
-
-      :bdd_bot ->
-        :bdd_bot
-
-      bdd_leaf(_, _) ->
-        intersection.(leaf, bdd)
-
-      {lit, c, u, _} when lit == leaf ->
-        case bdd_union(c, u) do
-          :bdd_bot -> :bdd_bot
-          cu -> {lit, cu, :bdd_bot, :bdd_bot}
-        end
-
-      {lit, c, u, d} ->
-        rest =
-          bdd_union(
-            bdd_leaf_intersection(leaf, u, intersection),
-            bdd_difference(bdd_leaf_intersection(leaf, d, intersection), lit)
-          )
-
-        with true <- c != :bdd_bot,
-             new_leaf = intersection.(leaf, lit),
-             true <- new_leaf != :bdd_bot do
-          bdd_union(bdd_leaf_intersection(new_leaf, c, intersection), rest)
-        else
-          _ -> rest
-        end
+        |> bdd_non_open_leaf_intersection(d, leaf_intersection)
+        |> bdd_difference(a)
+        |> bdd_union(result)
     end
   end
 
-  # Lazy negation: eliminate the union, then perform normal negation (switching leaves)
+  defp bdd_non_open_leaf_intersection(leaf, {a, :bdd_bot, u, d}, leaf_intersection) do
+    case bdd_non_open_leaf_intersection(leaf, u, leaf_intersection) do
+      result when d == :bdd_bot ->
+        result
+
+      result ->
+        leaf
+        |> bdd_non_open_leaf_intersection(d, leaf_intersection)
+        |> bdd_difference(a)
+        |> bdd_union(result)
+    end
+  end
+
+  defp bdd_non_open_leaf_intersection(bdd1, bdd2, _leaf_intersection) do
+    bdd_intersection(bdd1, bdd2)
+  end
+
+  # {lit, c, u, d} = (lit and c) or u or (not lit and d),
+  # so its negation is ((lit and not c) or (not lit and not d)) and not u.
   def bdd_negation(:bdd_top), do: :bdd_bot
   def bdd_negation(:bdd_bot), do: :bdd_top
   def bdd_negation({_, _} = pair), do: {pair, :bdd_bot, :bdd_bot, :bdd_top}
 
   def bdd_negation({lit, c, u, d}) do
-    {lit, bdd_negation(bdd_union(c, u)), :bdd_bot, bdd_negation(bdd_union(d, u))}
+    inner =
+      {lit, bdd_negation(c), :bdd_bot, bdd_negation(d)}
+
+    case bdd_intersection(inner, bdd_negation(u)) do
+      # Full simplification necessary for e.g. formatter.ex compilation
+      {_lit, c, u, c} -> bdd_union(u, c)
+      x -> x
+    end
   end
 
   def bdd_to_dnf(bdd), do: bdd_to_dnf([], [], [], bdd)

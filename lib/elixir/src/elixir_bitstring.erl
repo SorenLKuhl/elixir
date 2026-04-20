@@ -61,7 +61,7 @@ expand(BitstrMeta, Fun, [H | T], Acc, S, E, Alignment, RequireSize) ->
 
   InferredMeta = [{inferred_bitstring_spec, true} | Meta],
   EAcc = concat_or_prepend_bitstring(InferredMeta, ELeft, ERight, Acc, ES, MatchOrRequireSize),
-  expand(Meta, Fun, T, EAcc, {SS, OriginalS}, ES, Alignment, RequireSize).
+  expand(BitstrMeta, Fun, T, EAcc, {SS, OriginalS}, ES, Alignment, RequireSize).
 
 extract_meta({_, Meta, _}, _) -> Meta;
 extract_meta(_, Meta) -> Meta.
@@ -115,7 +115,9 @@ concat_or_prepend_bitstring(Meta, {'<<>>', PartsMeta, Parts} = ELeft, ERight, Ac
           [{'::', Meta, [ELeft, ERight]} | Acc]
       end;
     {bitstring, _, nil} ->
-      lists:reverse(Parts, Acc)
+      lists:reverse(Parts, Acc);
+    _ ->
+      [{'::', Meta, [ELeft, ERight]} | Acc]
   end;
 concat_or_prepend_bitstring(Meta, ELeft, ERight, Acc, _E, _RequireSize) ->
   [{'::', Meta, [ELeft, ERight]} | Acc].

@@ -1915,6 +1915,52 @@ defmodule Module.Types.ExprTest do
              ) == atom([:ok, nil])
     end
 
+    test "refines expression type" do
+      assert typecheck!(
+               if x = System.get_env("HELLO") do
+                 {:ok, x}
+               else
+                 {:error, x}
+               end
+             ) ==
+               dynamic(
+                 union(
+                   tuple([atom([:ok]), binary()]),
+                   tuple([atom([:error]), atom([nil])])
+                 )
+               )
+    end
+
+    test "refines nested expression type" do
+      assert typecheck!(
+               case (if x = System.get_env("HELLO") do
+                       :do
+                     else
+                       :else
+                     end) do
+                 :do -> {:ok, x}
+                 :else -> {:error, x}
+               end
+             ) ==
+               dynamic(
+                 union(
+                   tuple([atom([:ok]), binary()]),
+                   tuple([atom([:error]), atom([nil])])
+                 )
+               )
+    end
+
+    test "discards warnings from refinements" do
+      assert {_, [_]} =
+               typediag!(
+                 if x = System.unknown_function_get_env("HELLO") do
+                   {:ok, x}
+                 else
+                   {:error, x}
+                 end
+               )
+    end
+
     test "and/or does not report on literals" do
       assert typecheck!(false and true) == boolean()
       assert typecheck!(false or true) == atom([true])
@@ -2287,12 +2333,12 @@ defmodule Module.Types.ExprTest do
                  union(
                    closed_map(
                      __struct__: atom([ArgumentError]),
-                     __exception__: atom([true]),
+                     __exception__: term(),
                      message: term()
                    ),
                    closed_map(
                      __struct__: atom([RuntimeError]),
-                     __exception__: atom([true]),
+                     __exception__: term(),
                      message: term()
                    )
                  )
@@ -2309,7 +2355,7 @@ defmodule Module.Types.ExprTest do
              ) ==
                open_map(
                  __struct__: atom(),
-                 __exception__: atom([true])
+                 __exception__: term()
                )
     end
 
@@ -2328,7 +2374,7 @@ defmodule Module.Types.ExprTest do
 
              given types:
 
-                 %{..., __exception__: true, __struct__: atom()}
+                 %{..., __exception__: term(), __struct__: atom()}
 
              but expected one of:
 
@@ -2336,7 +2382,7 @@ defmodule Module.Types.ExprTest do
 
              where "e" was given the type:
 
-                 # type: %{..., __exception__: true, __struct__: atom()}
+                 # type: %{..., __exception__: term(), __struct__: atom()}
                  # from: types_test.ex
                  rescue e
 
@@ -2570,6 +2616,24 @@ defmodule Module.Types.ExprTest do
                  for(<<x::float <- binary>>, do: x, into: into)
                )
              ) == union(bitstring(), list(term()))
+    end
+
+    test ":into inference" do
+      assert typecheck!(
+               [x, y],
+               (
+                 List.to_integer([_ | _] = for(_ <- x, do: y))
+                 y
+               )
+             ) == dynamic(integer())
+
+      assert typecheck!(
+               [x, y],
+               (
+                 for(<<_ <- x>>, do: y, into: "")
+                 y
+               )
+             ) == dynamic(bitstring())
     end
 
     test ":into incompatibility" do
