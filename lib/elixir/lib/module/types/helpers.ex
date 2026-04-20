@@ -566,4 +566,10 @@ defmodule Module.Types.Helpers do
   defp zip_map_reduce([], [], list, acc, _fun) do
     {Enum.reverse(list), acc}
   end
+
+  ## Strict helpers
+
+  def is_strict?(name) when is_atom(name) do
+    String.starts_with?(Atom.to_string(name), "strict_")
+  end
 end

@@ -55,7 +55,7 @@ defmodule Module.Types.Descr do
   @non_empty_list_top {:term, :term}
   @tuple_top {:open, []}
   @map_empty {:closed, @fields_new}
-  @pid_top {:term, :none}
+  @pid_top {%{}, :term}
 
   # The top BDD for each arity.
   @fun_bdd_top :bdd_top
@@ -112,7 +112,7 @@ defmodule Module.Types.Descr do
   def open_map(pairs), do: map_descr(:open, pairs)
   def open_tuple(elements, _fallback \\ term()), do: tuple_descr(:open, elements)
   def pid(), do: %{pid: @pid_top}
-  def pid(msg_type), do: %{pid: {msg_type, :none}}
+  def pid(msg_type), do: %{pid: {msg_type, :term}}
   def pid(msg_type, return_type), do: %{pid: {msg_type, return_type}}
   def port(), do: %{bitmap: @bit_port}
   def reference(), do: %{bitmap: @bit_reference}
@@ -2626,7 +2626,8 @@ defmodule Module.Types.Descr do
 
   ## Pid
   defp pid_union({msg1, ret1}, {msg2, ret2}) do
-    msg = intersection(msg1, msg2)
+    # msg = intersection(msg1, msg2)
+    msg = union(msg1, msg2)
 
     ret =
       case {ret1, ret2} do
@@ -2636,34 +2637,31 @@ defmodule Module.Types.Descr do
         {r1, r2} -> union(r1, r2)
       end
 
+      {msg, ret}
+    end
+
+    defp pid_intersection({msg1, ret1}, {msg2, ret2}) do
+    # msg = union(msg1, msg2)
+    msg = intersection(msg1, msg2)
+
+    ret =
+      case {ret1, ret2} do
+        {:none, :none} -> :none
+        {:none, r} -> r
+        {r, :none} -> r
+        {r1, r2} -> intersection(r1, r2)
+      end
+
     {msg, ret}
   end
 
-  defp pid_intersection({msg1, ret1}, {msg2, ret2}) do
-    msg = union(msg1, msg2)
-
-    if empty?(msg) do
-      0
-    else
-      ret =
-        case {ret1, ret2} do
-          {:none, :none} -> :none
-          {:none, r} -> r
-          {r, :none} -> r
-          {r1, r2} -> intersection(r1, r2)
-        end
-
-      {msg, ret}
-    end
-  end
-
-  defp pid_empty?({msg_type, _ret_type}), do: empty?(msg_type)
+  defp pid_empty?({_msg_type, ret_type}), do: empty?(ret_type)
 
   # renders as  pid()
-  defp pid_to_quoted({:term, :none}, _opts), do: [{:pid, [], []}]
+  defp pid_to_quoted({@none, :term}, _opts), do: [{:pid, [], []}]
 
   # renders as  pid(integer())
-  defp pid_to_quoted({msg_type, :none}, opts),
+  defp pid_to_quoted({msg_type, :term}, opts),
     do: [{:pid, [], [to_quoted(msg_type, opts)]}]
 
   # renders as  pid(integer(), atom())
@@ -2680,6 +2678,8 @@ defmodule Module.Types.Descr do
   # term() contains pid()
   def pid_message_type(:term), do: :term
   def pid_message_type(%{dynamic: :term}), do: :term
+  def pid_message_type(@none), do: @none
+  def pid_message_type(%{dynamic: @none}), do: @none
   def pid_message_type(%{dynamic: pid_type}), do: pid_message_type(pid_type)
 
   def pid_message_type(%{map: {:closed, fields}}) when is_map(fields) do

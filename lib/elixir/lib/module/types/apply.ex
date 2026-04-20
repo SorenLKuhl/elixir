@@ -95,7 +95,7 @@ defmodule Module.Types.Apply do
   mfargs = [atom(), atom(), list(term())]
 
   send_destination =
-    pid(none())
+    pid()
     |> union(reference())
     |> union(port())
     |> union(atom())
@@ -1425,7 +1425,14 @@ defmodule Module.Types.Apply do
     {args_types, context} =
       zip_map_reduce(args, domain, context, &of_fun.(&1, &2, expr, stack, &3))
 
-    local_apply(local_info, fun, args_types, expr, stack, context)
+    # Check for strict subtyping if function is "strict"
+    if Helpers.is_strict?(fun) and not zip_subtype?(args_types, domain) do
+      # IO.puts("local apply: #{fun}/#{length(args)} with args types #{inspect(args_types)}, expected #{inspect(expected)}, domain #{inspect(domain)}, local_info: #{inspect(local_info)}")
+      error = {:badlocal, Kernel.elem(local_info, 1), args_types, expr, context}
+      {error_type(), error(error, with_span(elem(expr, 1), fun), stack, context)}
+    else
+      local_apply(local_info, fun, args_types, expr, stack, context)
+    end
   end
 
   defp local_domain(fun, args, expected, meta, stack, context) do
@@ -1668,6 +1675,12 @@ defmodule Module.Types.Apply do
   end
 
   defp zip_not_disjoint?([], []), do: true
+
+  defp zip_subtype?([actual | actuals], [expected | expecteds]) do
+    subtype?(actual, expected) and zip_subtype?(actuals, expecteds)
+  end
+
+  defp zip_subtype?([], []), do: true
 
   ## Error handling
 
