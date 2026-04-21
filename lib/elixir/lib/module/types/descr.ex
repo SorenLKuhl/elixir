@@ -112,7 +112,7 @@ defmodule Module.Types.Descr do
   def open_map(pairs), do: map_descr(:open, pairs)
   def open_tuple(elements, _fallback \\ term()), do: tuple_descr(:open, elements)
   def pid(), do: %{pid: @pid_top}
-  def pid(msg_type), do: %{pid: {msg_type, :term}}
+  def pid(msg_type), do: %{pid: {msg_type, :none}}
   def pid(msg_type, return_type), do: %{pid: {msg_type, return_type}}
   def port(), do: %{bitmap: @bit_port}
   def reference(), do: %{bitmap: @bit_reference}
@@ -2643,7 +2643,6 @@ defmodule Module.Types.Descr do
     end
 
   defp pid_intersection({msg1, ret1}, {msg2, ret2}) do
-    # Contravariant: pid(A) ∩ pid(B) = pid(A ∪ B).
     # pid(none()) is the TOP (all pids), so this is never empty.
     msg = union(msg1, msg2)
 
@@ -2667,7 +2666,7 @@ defmodule Module.Types.Descr do
     do: [{:pid, [], []}]
 
   # renders as  pid(integer())
-  defp pid_to_quoted({msg_type, :term}, opts),
+  defp pid_to_quoted({msg_type, :none}, opts),
     do: [{:pid, [], [to_quoted(msg_type, opts)]}]
 
   # renders as  pid(integer(), atom())

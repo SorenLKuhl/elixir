@@ -86,7 +86,7 @@ defmodule Module.Types.Of do
   or if we are doing a guard analysis or occurrence typing.
   Returns `true` if there was a refinement, `false` otherwise.
   """
-  @skip_refinement_for [term(), dynamic()]
+  @skip_refinement_for [term(), dynamic()]#, %{atom: {:negation, %{}}, pid: {%{tuple: {:closed, [%{atom: {:union, %{text: []}}}, %{bitmap: 1}]}}, :none}, tuple: {:closed, [%{atom: {:negation, %{}}}, %{atom: {:negation, %{}}}]}, bitmap: 192}]
   def refine_body_var(var_or_version, type, expr, stack, context)
 
   def refine_body_var({_, meta, _}, type, expr, stack, context) do
@@ -97,59 +97,64 @@ defmodule Module.Types.Of do
       when is_integer(version) or is_reference(version) do
     %{vars: %{^version => %{type: old_type, off_traces: off_traces} = data} = vars} = context
 
-    context =
-      case context.conditional_vars do
-        %{} = conditional_vars ->
-          %{context | conditional_vars: Map.put(conditional_vars, version, true)}
+    if is_strict_fun(expr) do
+      {old_type, context}
+    else
 
-        nil ->
-          context
+      context =
+        case context.conditional_vars do
+          %{} = conditional_vars ->
+            %{context | conditional_vars: Map.put(conditional_vars, version, true)}
+
+          nil ->
+            context
+        end
+
+      case context do
+        _ when type in @skip_refinement_for or is_map_key(data, :errored) ->
+          {old_type, context}
+
+        %{pattern_info: %{guard_context: guard_context}} ->
+          new_type = intersection(old_type, type)
+
+          case empty?(new_type) do
+            true when guard_context == :orelse ->
+              data = %{
+                data
+                | type: none(),
+                  off_traces: new_trace(expr, none(), stack, off_traces)
+              }
+
+              {none(), %{context | vars: %{vars | version => data}}}
+
+            false when new_type != old_type ->
+              data = %{
+                data
+                | type: new_type,
+                  off_traces: new_trace(expr, new_type, stack, off_traces)
+              }
+
+              {new_type, %{context | vars: %{vars | version => data}}}
+
+            _ ->
+              {old_type, context}
+          end
+
+        _ ->
+          case gradual?(old_type) and compatible_intersection(old_type, type) do
+            {:ok, new_type} when new_type != old_type ->
+              data = %{
+                data
+                | type: new_type,
+                  off_traces: new_trace(expr, new_type, stack, off_traces)
+              }
+
+              {new_type, %{context | vars: %{vars | version => data}}}
+
+            _ ->
+              {old_type, context}
+          end
       end
-
-    case context do
-      _ when type in @skip_refinement_for or is_map_key(data, :errored) ->
-        {old_type, context}
-
-      %{pattern_info: %{guard_context: guard_context}} ->
-        new_type = intersection(old_type, type)
-
-        case empty?(new_type) do
-          true when guard_context == :orelse ->
-            data = %{
-              data
-              | type: none(),
-                off_traces: new_trace(expr, none(), stack, off_traces)
-            }
-
-            {none(), %{context | vars: %{vars | version => data}}}
-
-          false when new_type != old_type ->
-            data = %{
-              data
-              | type: new_type,
-                off_traces: new_trace(expr, new_type, stack, off_traces)
-            }
-
-            {new_type, %{context | vars: %{vars | version => data}}}
-
-          _ ->
-            {old_type, context}
-        end
-
-      _ ->
-        case gradual?(old_type) and compatible_intersection(old_type, type) do
-          {:ok, new_type} when new_type != old_type ->
-            data = %{
-              data
-              | type: new_type,
-                off_traces: new_trace(expr, new_type, stack, off_traces)
-            }
-
-            {new_type, %{context | vars: %{vars | version => data}}}
-
-          _ ->
-            {old_type, context}
-        end
     end
   end
 

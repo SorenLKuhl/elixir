@@ -821,10 +821,11 @@ defmodule Module.Types.Apply do
     {{:strong, nil, [{domain, term()}]}, domain, context}
   end
 
-  def remote_domain(:erlang, :send, [dest, msg], _expected, _meta, _stack, context) do
-    # For now, accept term() for dest and term() for msg — the real check
-    # happens after types are resolved in remote_apply.
-    domain = [@send_destination, term()]
+  def remote_domain(:erlang, :send, [_dest, msg], _expected, _meta, _stack, context) do
+    msg_type = literal_to_descr(msg)
+
+    dst = difference(@send_destination, pid()) |> union(pid(msg_type))
+    domain = [dst, term()]
     {{:strong, nil, [{domain, dynamic()}]}, domain, context}
   end
 
@@ -1425,12 +1426,12 @@ defmodule Module.Types.Apply do
     {args_types, context} =
       zip_map_reduce(args, domain, context, &of_fun.(&1, &2, expr, stack, &3))
 
-    if fun == :pid_sender do
-      IO.puts("Context before local_apply for #{fun}: #{inspect(context, limit: :infinity, pretty: true)}")
-      IO.puts("Args types for #{fun}: #{inspect(args_types, limit: :infinity, pretty: :true)}")
+    if is_strict?(fun) and not zip_subtype?(args_types, domain) do
+      error = {:badlocal, Kernel.elem(local_info, 1), args_types, expr, context}
+      {error_type(), error(error, with_span(elem(expr, 1), fun), stack, context)}
+    else
+      local_apply(local_info, fun, args_types, expr, stack, context)
     end
-
-    local_apply(local_info, fun, args_types, expr, stack, context)
   end
 
   defp local_domain(fun, args, expected, meta, stack, context) do
@@ -2296,4 +2297,48 @@ defmodule Module.Types.Apply do
         []
     end
   end
+
+  # Convert quoted literals to their internal descriptor representation.
+  defp literal_to_descr(literal) when is_atom(literal), do: atom([literal])
+  defp literal_to_descr(literal) when is_integer(literal), do: integer()
+  defp literal_to_descr(literal) when is_float(literal), do: float()
+  defp literal_to_descr(literal) when is_binary(literal), do: binary()
+  defp literal_to_descr(literal) when is_pid(literal), do: pid()  # TODO: handle internal types of pid
+  defp literal_to_descr(literal) when is_port(literal), do: port()
+  defp literal_to_descr(literal) when is_reference(literal), do: reference()
+  defp literal_to_descr([]), do: empty_list()
+
+  defp literal_to_descr(list) when is_list(list) do
+    {prefix, suffix} = unpack_list(list, [])
+
+    head_type =
+      case prefix do
+        [] -> term()
+        _ -> prefix |> Enum.map(&literal_to_descr/1) |> Enum.reduce(&union/2)
+      end
+
+    suffix_type = if suffix == [], do: empty_list(), else: literal_to_descr(suffix)
+    non_empty_list(head_type, suffix_type)
+  end
+
+  defp literal_to_descr({left, right}), do: tuple([literal_to_descr(left), literal_to_descr(right)])
+
+  defp literal_to_descr({:{}, _meta, entries}) when is_list(entries) do
+    tuple(Enum.map(entries, &literal_to_descr/1))
+  end
+
+  defp literal_to_descr({:%{}, _meta, entries}) when is_list(entries) do
+    known_entries =
+      Enum.flat_map(entries, fn
+        {key, value} when is_atom(key) -> [{key, literal_to_descr(value)}]
+        _ -> []
+      end)
+
+    case known_entries do
+      [] -> open_map()
+      _ -> open_map(known_entries)
+    end
+  end
+
+  defp literal_to_descr(_other), do: term()
 end

@@ -572,4 +572,18 @@ defmodule Module.Types.Helpers do
   def is_strict?(name) when is_atom(name) do
     String.starts_with?(Atom.to_string(name), "strict_")
   end
+
+  def is_strict?(_) do
+    false
+  end
+
+  defmacro is_strict_fun(expr) do
+    quote do
+      is_tuple(unquote(expr)) and
+        tuple_size(unquote(expr)) == 3 and
+        is_atom(elem(unquote(expr), 0)) and
+        byte_size(:erlang.atom_to_binary(elem(unquote(expr), 0))) >= 7 and
+        binary_part(:erlang.atom_to_binary(elem(unquote(expr), 0)), 0, 7) == "strict_"
+    end
+  end
 end
