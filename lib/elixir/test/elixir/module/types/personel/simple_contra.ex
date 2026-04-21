@@ -6,11 +6,12 @@ defmodule SimpleContravariantTest do
 
   def main do
     # Pid that only accepts {:number, integer()}
-    pid = spawn(fn ->
-      receive do
-        {:number, n} when is_integer(n) -> n
-      end
-    end)
+    pid =
+      spawn(fn ->
+        receive do
+          {:number, n} when is_integer(n) -> n
+        end
+      end)
 
     # Should error - incompatible
     pid_sender(pid)

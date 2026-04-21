@@ -2639,8 +2639,8 @@ defmodule Module.Types.Descr do
         {r1, r2} -> union(r1, r2)
       end
 
-      {msg, ret}
-    end
+    {msg, ret}
+  end
 
   defp pid_intersection({msg1, ret1}, {msg2, ret2}) do
     # pid(none()) is the TOP (all pids), so this is never empty.

@@ -22,7 +22,6 @@ defmodule TypedPidSendTest do
     end
   end
 
-
   # def test_send_wrong_type do
   #   pid =
   #     spawn(fn ->

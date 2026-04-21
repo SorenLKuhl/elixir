@@ -11,5 +11,4 @@ defmodule SimpleFunction do
   def test_error do
     add_one("not a number")
   end
-
 end

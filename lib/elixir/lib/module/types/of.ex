@@ -86,7 +86,8 @@ defmodule Module.Types.Of do
   or if we are doing a guard analysis or occurrence typing.
   Returns `true` if there was a refinement, `false` otherwise.
   """
-  @skip_refinement_for [term(), dynamic()]#, %{atom: {:negation, %{}}, pid: {%{tuple: {:closed, [%{atom: {:union, %{text: []}}}, %{bitmap: 1}]}}, :none}, tuple: {:closed, [%{atom: {:negation, %{}}}, %{atom: {:negation, %{}}}]}, bitmap: 192}]
+  # , %{atom: {:negation, %{}}, pid: {%{tuple: {:closed, [%{atom: {:union, %{text: []}}}, %{bitmap: 1}]}}, :none}, tuple: {:closed, [%{atom: {:negation, %{}}}, %{atom: {:negation, %{}}}]}, bitmap: 192}]
+  @skip_refinement_for [term(), dynamic()]
   def refine_body_var(var_or_version, type, expr, stack, context)
 
   def refine_body_var({_, meta, _}, type, expr, stack, context) do
@@ -100,7 +101,6 @@ defmodule Module.Types.Of do
     if is_strict_fun(expr) do
       {old_type, context}
     else
-
       context =
         case context.conditional_vars do
           %{} = conditional_vars ->

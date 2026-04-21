@@ -1,6 +1,7 @@
 defmodule SimpleGenServer do
- use GenServer
-   def start_link() do
+  use GenServer
+
+  def start_link() do
     {_, pid} = GenServer.start_link(__MODULE__, [])
     pid
   end

@@ -12,16 +12,16 @@ defmodule TypedPidSendTest do
   end
 
   # Is there a way to enforce the type of the pid without using guards?
-  # pid_sender(pid) accepts the default: pid({:term, :none}), it does not carry the type from the calling funciton.
+  # strict_pid_sender(pid) accepts the default: pid({:term, :none}), it does not carry the type from the calling funciton.
 
-  def pid_sender(pid) do
+  def strict_pid_sender(pid) do
     send(pid, {:text, 5})
   end
 
   def main do
     pid = test_send_wrong_type()
 
-    pid_sender(pid)
+    strict_pid_sender(pid)
     # send(pid, {:text, 5})
   end
 end

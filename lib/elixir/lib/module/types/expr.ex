@@ -393,7 +393,7 @@ defmodule Module.Types.Expr do
 
       of_body = fn _args_types, body, context -> of_expr(body, term(), body, stack, context) end
 
-    {acc, context} =
+      {acc, context} =
         of_clauses_fun(clauses, domain, :fn, stack, context, of_body, [], fn
           trees, body_type, context, acc ->
             args_types = Pattern.of_domain(trees, stack, context)

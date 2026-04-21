@@ -1701,7 +1701,7 @@ defmodule Module.Types.Apply do
 
     {message, to_trace, hints} =
       case reason do
-        {:badarg, domain} ->
+        {:badarg, domain, _empty?} ->
           message = """
           incompatible types given on #{mfa_or_call}:
 
@@ -2303,7 +2303,8 @@ defmodule Module.Types.Apply do
   defp literal_to_descr(literal) when is_integer(literal), do: integer()
   defp literal_to_descr(literal) when is_float(literal), do: float()
   defp literal_to_descr(literal) when is_binary(literal), do: binary()
-  defp literal_to_descr(literal) when is_pid(literal), do: pid()  # TODO: handle internal types of pid
+  # TODO: handle internal types of pid
+  defp literal_to_descr(literal) when is_pid(literal), do: pid()
   defp literal_to_descr(literal) when is_port(literal), do: port()
   defp literal_to_descr(literal) when is_reference(literal), do: reference()
   defp literal_to_descr([]), do: empty_list()
@@ -2321,7 +2322,8 @@ defmodule Module.Types.Apply do
     non_empty_list(head_type, suffix_type)
   end
 
-  defp literal_to_descr({left, right}), do: tuple([literal_to_descr(left), literal_to_descr(right)])
+  defp literal_to_descr({left, right}),
+    do: tuple([literal_to_descr(left), literal_to_descr(right)])
 
   defp literal_to_descr({:{}, _meta, entries}) when is_list(entries) do
     tuple(Enum.map(entries, &literal_to_descr/1))
