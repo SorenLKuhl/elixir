@@ -852,6 +852,7 @@ defmodule Module.Types.Apply do
   end
 
   def remote_domain(mod, fun, args, expected, meta, stack, context) do
+    # Check for strict fun here?
     arity = length(args)
     {info, context} = signature(mod, fun, arity, meta, stack, context)
     {info, filter_domain(info, expected, arity), context}
@@ -1426,6 +1427,7 @@ defmodule Module.Types.Apply do
     {args_types, context} =
       zip_map_reduce(args, domain, context, &of_fun.(&1, &2, expr, stack, &3))
 
+    # Apply Strict subtyping
     if is_strict?(fun) and not zip_subtype?(args_types, domain) do
       error = {:badlocal, Kernel.elem(local_info, 1), args_types, expr, context}
       {error_type(), error(error, with_span(elem(expr, 1), fun), stack, context)}
@@ -2298,7 +2300,7 @@ defmodule Module.Types.Apply do
     end
   end
 
-  # Convert quoted literals to their internal descriptor representation.
+  # Convert quoted literals to their descriptor representation.
   defp literal_to_descr(literal) when is_atom(literal), do: atom([literal])
   defp literal_to_descr(literal) when is_integer(literal), do: integer()
   defp literal_to_descr(literal) when is_float(literal), do: float()

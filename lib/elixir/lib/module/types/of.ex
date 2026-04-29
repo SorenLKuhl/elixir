@@ -98,6 +98,7 @@ defmodule Module.Types.Of do
       when is_integer(version) or is_reference(version) do
     %{vars: %{^version => %{type: old_type, off_traces: off_traces} = data} = vars} = context
 
+    # Dont refine the var if in a strict fun
     if is_strict_fun(expr) do
       {old_type, context}
     else
