@@ -2628,8 +2628,7 @@ defmodule Module.Types.Descr do
 
   ## Pid
   defp pid_union({msg1, ret1}, {msg2, ret2}) do
-    # msg = intersection(msg1, msg2)
-    msg = union(msg1, msg2)
+    msg = intersection(msg1, msg2)
 
     ret =
       case {ret1, ret2} do
