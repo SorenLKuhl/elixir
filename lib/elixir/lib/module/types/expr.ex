@@ -581,8 +581,6 @@ defmodule Module.Types.Expr do
     # Retrieve the accepted message types
     msg_type = context.receive_acc
 
-    # {pid(msg_type, fun_type), Map.delete(context, :receive_acc)}
-
     # Remove the receive accumulator as to not mess up other receive clauses
     {pid(msg_type), Map.delete(context, :receive_acc)}
   end

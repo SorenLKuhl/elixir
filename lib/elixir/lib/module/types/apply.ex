@@ -821,10 +821,15 @@ defmodule Module.Types.Apply do
     {{:strong, nil, [{domain, term()}]}, domain, context}
   end
 
-  def remote_domain(:erlang, :send, [_dest, msg], _expected, _meta, _stack, context) do
+  def remote_domain(:erlang, :send, [_dest, msg], _expected, _meta, stack, context) do
     msg_type = literal_to_descr(msg)
 
-    dst = difference(@send_destination, pid()) |> union(pid(msg_type))
+    dst = if is_strict?(Kernel.elem(stack.function,0)) do
+      difference(@send_destination, pid()) |> union(pid(msg_type))
+    else
+      @send_destination
+    end
+
     domain = [dst, term()]
     {{:strong, nil, [{domain, dynamic()}]}, domain, context}
   end
@@ -2289,13 +2294,13 @@ defmodule Module.Types.Apply do
   ### Helper to get GenServer handle_call clauses in the given module.
   defp handle_call_clauses(module, meta, stack, context) do
     case signature(module, :handle_call, 3, meta, stack, context) do
-      {{:infer, _domain, clauses}, context} ->
+      {{:infer, _domain, clauses}, _context} ->
         clauses
 
-      {{:strong, _domain, clauses}, context} ->
+      {{:strong, _domain, clauses}, _context} ->
         clauses
 
-      {:none, context} ->
+      {:none, _context} ->
         []
     end
   end
