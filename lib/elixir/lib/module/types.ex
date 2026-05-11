@@ -332,8 +332,18 @@ defmodule Module.Types do
             {trees, head_no_previous_args_types, previous, head_context} =
               Pattern.of_head(args, guards, expected, previous, info, meta, stack, fresh_context)
 
+            # Track parameter variable versions so remote_domain(:erlang, :send, ...)
+            # can accumulate message types sent to them during body analysis.
+            param_versions = Map.new(head_context.vars, fn {k, _} -> {k, true} end)
+
+            head_context =
+              Map.merge(head_context, %{send_param_acc: %{}, param_versions: param_versions})
+
             {return_type, context} =
               Expr.of_expr(body, Descr.term(), body, stack, head_context)
+
+            # Infer typed pid() for parameters that are only used as send destinations
+            context = infer_pid_params_from_sends(context)
 
             args_types = Pattern.of_domain(trees, stack, context)
 
@@ -371,6 +381,30 @@ defmodule Module.Types do
 
     inferred = {:infer, domain, Enum.reverse(clauses_types)}
     {inferred, mapping, restore_context(clauses_context, context)}
+  end
+
+  # For each unannotated parameter used as a `send/2` destination, infer its
+  # type as `pid(union_of_sent_messages)`. This enables contravariant checking
+  # at call sites: the caller's pid must accept the messages this function sends.
+  defp infer_pid_params_from_sends(context) do
+    {send_param_acc, context} = Map.pop(context, :send_param_acc, %{})
+    context = Map.delete(context, :param_versions)
+    Enum.reduce(send_param_acc, context, fn {version, msg_type}, context ->
+      case Map.fetch(context.vars, version) do
+        {:ok, %{type: current_type} = var_info} ->
+          # Only infer when the parameter has a gradual (unannotated) type.
+          # Annotated params have a static type and are already checked in the body.
+          if Descr.gradual?(current_type) do
+            updated_vars = Map.put(context.vars, version, %{var_info | type: Descr.pid(msg_type)})
+            %{context | vars: updated_vars}
+          else
+            context
+          end
+
+        :error ->
+          context
+      end
+    end)
   end
 
   defp compute_domain(

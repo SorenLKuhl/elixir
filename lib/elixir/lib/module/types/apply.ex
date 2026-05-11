@@ -137,6 +137,15 @@ defmodule Module.Types.Apply do
       {[atom([left]), atom([right])], atom([left or right])}
     end
 
+  defp of_literal(atom) when is_atom(atom), do: atom([atom])
+  defp of_literal(int) when is_integer(int), do: integer()
+  defp of_literal(float) when is_float(float), do: float()
+  defp of_literal(bin) when is_binary(bin), do: binary()
+  defp of_literal([]), do: empty_list()
+  defp of_literal({left, right}), do: tuple([of_literal(left), of_literal(right)])
+  defp of_literal({:{}, _meta, elems}), do: tuple(Enum.map(elems, &of_literal/1))
+  defp of_literal(_), do: term()
+
   for {mod, fun, clauses} <- [
         # :binary
         {:binary, :copy, [{[binary(), integer()], binary()}]},
@@ -821,11 +830,35 @@ defmodule Module.Types.Apply do
     {{:strong, nil, [{domain, term()}]}, domain, context}
   end
 
-  def remote_domain(:erlang, :send, [_dest, msg], _expected, _meta, _stack, context) do
-    msg_type = literal_to_descr(msg)
+  def remote_domain(:erlang, :send, [dest, msg], _expected, _meta, _stack, context) do
+    # If dest is a function parameter variable, accumulate the sent message type
+    # so local_handler can infer a typed pid() for that parameter.
+    # if (fun == :pid_sender) do
+    IO.puts(
+      "pid_sender called with context: #{inspect(context, pretty: true, limit: :infinity)}"
+    )
+    # end
+    context =
+      if Map.has_key?(context, :send_param_acc) and is_var(dest) do
+        version = Keyword.fetch!(elem(dest, 1), :version)
 
-    dst = difference(@send_destination, pid()) |> union(pid(msg_type))
-    domain = [dst, term()]
+        if Map.has_key?(context.param_versions, version) do
+          msg_type = of_literal(msg)
+
+          update_in(
+            context.send_param_acc,
+            &Map.update(&1, version, msg_type, fn acc -> union(acc, msg_type) end)
+          )
+        else
+          context
+        end
+      else
+        context
+      end
+
+    # term() fallback for non-literals
+    msg_domain = of_literal(msg)
+    domain = [@send_destination, msg_domain]
     {{:strong, nil, [{domain, dynamic()}]}, domain, context}
   end
 
@@ -1423,6 +1456,11 @@ defmodule Module.Types.Apply do
   def local(fun, args, expected, {_, meta, _} = expr, stack, context, of_fun) do
     {local_info, domain, context} = local_domain(fun, args, expected, meta, stack, context)
 
+    # Check pid args using pre-refinement types (variable types from context.vars).
+    # Must happen BEFORE zip_map_reduce because refinement merges the argument's
+    # pid message type with the expected type, masking incompatibilities.
+    context = check_pid_args_pre_refinement(local_info, args, expr, stack, context)
+
     {args_types, context} =
       zip_map_reduce(args, domain, context, &of_fun.(&1, &2, expr, stack, &3))
 
@@ -1655,6 +1693,78 @@ defmodule Module.Types.Apply do
   defp apply_clauses([], _args_types, _index, count, used, returns) do
     {count, used, returns}
   end
+
+  # Contravariant pid check run BEFORE zip_map_reduce so we use pre-refinement types.
+  # For each inferred clause, check whether pid arguments satisfy pid(M): the actual
+  # arg's pid must accept at least M (i.e. M <: actual_msg_type).
+  # Only variable args have pre-refinement types available via context.vars; non-variable
+  # args fall back to dynamic() and are not checked.
+  defp check_pid_args_pre_refinement(
+         {_update_used?, {:infer, _domain, clauses}},
+         args,
+         expr,
+         stack,
+         context
+       ) do
+    natural_types = natural_arg_types(args, context)
+
+    Enum.reduce(clauses, context, fn {expected_args, _return}, context ->
+      check_pid_args(expected_args, natural_types, expr, stack, context)
+    end)
+  end
+
+  defp check_pid_args_pre_refinement(_info, _args, _expr, _stack, context), do: context
+
+  # For variable args, look up their current type from context.vars (pre-refinement).
+  # For non-variable args, use dynamic() to skip the pid check.
+  defp natural_arg_types(args, context) do
+    Enum.map(args, fn
+      {name, meta, ctx} when is_atom(name) and is_atom(ctx) ->
+        version = Keyword.get(meta, :version)
+
+        case version && Map.fetch(context.vars, version) do
+          {:ok, %{type: t}} -> t
+          _ -> dynamic()
+        end
+
+      _ ->
+        dynamic()
+    end)
+  end
+
+  defp check_pid_args([expected | rest_expected], [actual | rest_actual], expr, stack, context) do
+    context =
+      case pid_message_type(expected) do
+        expected_msg when expected_msg not in [:none, :term] ->
+          # The parameter has a typed static pid. Check that the actual arg's pid
+          # can receive the messages this function will send to it.
+          case pid_message_type(actual) do
+            :none ->
+              # Untyped pid() argument — cannot verify statically, skip
+              context
+
+            actual_msg ->
+              # Contravariant check: expected_msg <: actual_msg
+              # i.e., the actual pid must accept at least the messages being sent
+              if subtype?(expected_msg, actual_msg) do
+                context
+              else
+                warning =
+                  {:pid_arg_send_mismatch, actual, expected, expected_msg, actual_msg, expr,
+                   context}
+
+                warn(__MODULE__, warning, elem(expr, 1), stack, context)
+              end
+          end
+
+        _ ->
+          context
+      end
+
+    check_pid_args(rest_expected, rest_actual, expr, stack, context)
+  end
+
+  defp check_pid_args([], [], _expr, _stack, context), do: context
 
   defp zip_compatible_or_only_gradual?([actual | actuals], [expected | expecteds]) do
     (only_gradual?(actual) or compatible?(actual, expected)) and
@@ -2148,6 +2258,43 @@ defmodule Module.Types.Apply do
           got:      #{to_quoted_string(msg_type)}
           pid type: #{to_quoted_string(dest_type)}
           """
+        ])
+    }
+  end
+
+  def format_diagnostic(
+        {:pid_arg_send_mismatch, actual_type, expected_type, expected_msg, actual_msg, expr,
+         context}
+      ) do
+    traces = collect_traces(expr, context)
+    {fun, _meta, _args} = expr
+
+    %{
+      details: %{typing_traces: traces},
+      message:
+        IO.iodata_to_binary([
+          """
+          incompatible pid type passed to #{fun}/#{length(elem(expr, 2))}:
+
+              #{expr_to_string(expr) |> indent(4)}
+
+          the function will send messages of type:
+
+              #{to_quoted_string(expected_msg) |> indent(4)}
+
+          but the given pid only accepts:
+
+              #{to_quoted_string(actual_msg) |> indent(4)}
+
+          given pid type:
+
+              #{to_quoted_string(actual_type) |> indent(4)}
+
+          expected pid type:
+
+              #{to_quoted_string(expected_type) |> indent(4)}
+          """,
+          format_traces(traces)
         ])
     }
   end
