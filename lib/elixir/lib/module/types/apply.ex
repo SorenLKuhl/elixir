@@ -915,10 +915,6 @@ defmodule Module.Types.Apply do
         # pid()
         {:ok, return(dynamic(), args_types, stack)}
 
-      :term ->
-        # "bottom" pid type. Is this ever used?
-        {:ok, return(dynamic(), args_types, stack)}
-
       msg_type ->
         # Typed pid — verify the message is a subtype
         if subtype?(msg, msg_type) do
