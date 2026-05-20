@@ -821,6 +821,54 @@ defmodule Module.Types.Apply do
     {{:strong, nil, [{domain, term()}]}, domain, context}
   end
 
+  def remote_domain(GenServer, :call, [pid, msg], _expected, _meta, stack, context) do
+    
+    pid_type = literal_to_descr(pid)
+    msg_type = literal_to_descr(msg)
+
+    dst = if is_strict?(Kernel.elem(stack.function,0)) do
+      pid(msg_type)
+    else
+      pid_type
+    end
+
+    domain = [dst, term()]
+
+    {{:strong, nil, [{domain, dynamic()}]}, domain, context}
+  end
+
+  def remote_domain(GenServer, :call, [pid, msg, _timeout], _expected, _meta, stack, context) do
+
+    pid_type = literal_to_descr(pid)
+    msg_type = literal_to_descr(msg)
+
+    dst = if is_strict?(Kernel.elem(stack.function,0)) do
+      pid(msg_type)
+    else
+      pid_type
+    end
+
+    domain = [dst, term(), integer()]
+
+    {{:strong, nil, [{domain, dynamic()}]}, domain, context}
+  end
+
+  def remote_domain(GenServer, :cast, [pid, msg], _expected, _meta, stack, context) do
+
+    pid_type = literal_to_descr(pid)
+    msg_type = literal_to_descr(msg)
+
+    dst = if is_strict?(Kernel.elem(stack.function,0)) do
+      pid(msg_type)
+    else
+      pid_type
+    end
+
+    domain = [dst, term()]
+
+    {{:strong, nil, [{domain, dynamic()}]}, domain, context}
+  end
+
   def remote_domain(:erlang, :send, [_dest, msg], _expected, _meta, stack, context) do
     msg_type = literal_to_descr(msg)
 
@@ -1205,34 +1253,23 @@ defmodule Module.Types.Apply do
     remote_apply_genserver_call(pid_type, request_type, stack)
   end
 
-  # Helper for GenServer.call type inference
-  defp remote_apply_genserver_call(pid_type, request_type, stack) do
-    # Look up the handle_call clauses for the current module - assuming the definition is in the same module as the call.
-    clauses = handle_call_clauses(stack.module, [], stack, %{cache: stack.cache, warnings: []})
 
-    # Go through the clauses and find those that match the request type
-    matching_responses =
-      Enum.flat_map(clauses, fn {[clause_request_type | _], return_type} ->
-        case compatible_intersection(request_type, clause_request_type) do
-          {:ok, _} ->
-            [return_type]
+  defp remote_apply(GenServer, :cast, _info, [pid_type, request_type], stack) do
+    pid_msg_type = pid_message_type(pid_type)
 
-          {:error, _} ->
-            # this clause does not match the request type
-            []
+    pid_ret_type = pid_return_type(pid_type)
+
+    case pid_msg_type do
+      :none ->
+        # If we don't know the message type, we can't infer anything about the return type
+        {:ok, dynamic()}
+
+      msg_type ->
+        if subtype?(request_type, pid_msg_type) do
+          {:ok, atom([:ok])}
+        else
+          {:error, {:bad_genserver_call, stack.module, request_type, handle_cast_clauses(stack.module, stack)}}
         end
-      end)
-
-    case matching_responses do
-      [] ->
-        # TODO: add better error message
-        {:error, {:bad_genserver_call, stack.module, request_type, clauses}}
-
-      # {:ok, dynamic()}
-      _ ->
-        # Union all matching return types to get the overall response type
-        response_type = Enum.reduce(matching_responses, &union/2)
-        {:ok, response_type}
     end
   end
 
@@ -2109,7 +2146,7 @@ defmodule Module.Types.Apply do
   end
 
   def format_diagnostic(
-        {{:bad_genserver_call, module, request_type, clauses}, mfac, expr, context}
+        {{:bad_genserver_call, _module, request_type, clauses}, mfac, expr, context}
       ) do
     {mod, fun, arity, _converter} = mfac
     mfa = Exception.format_mfa(mod, fun, arity)
@@ -2287,17 +2324,40 @@ defmodule Module.Types.Apply do
     end
   end
 
-  ### Helper to get GenServer handle_call clauses in the given module.
-  defp handle_call_clauses(module, meta, stack, context) do
-    case signature(module, :handle_call, 3, meta, stack, context) do
-      {{:infer, _domain, clauses}, _context} ->
-        clauses
+  ### GenServer Helpers
 
-      {{:strong, _domain, clauses}, _context} ->
-        clauses
 
-      {:none, _context} ->
-        []
+  # Helper for GenServer.call type inference
+  defp remote_apply_genserver_call(pid_type, request_type, stack) do
+    pid_msg_type = pid_message_type(pid_type)
+
+    pid_ret_type = pid_return_type(pid_type)
+
+    case pid_msg_type do
+      :none ->
+        # If we don't know the message type, we can't infer anything about the return type
+        {:ok, dynamic()}
+
+      _msg_type ->
+        if subtype?(request_type, pid_msg_type) do
+          {:ok, return(pid_ret_type, [pid_type, request_type], stack)}
+        else
+          {:error, {:bad_genserver_call, stack.module, request_type, handle_call_clauses(stack.module, stack)}}
+        end
+    end
+  end
+
+
+  def handle_call_clauses(module, stack),
+    do: genserver_callback_clauses(module, :handle_call, 3, stack)
+
+  def handle_cast_clauses(module, stack),
+    do: genserver_callback_clauses(module, :handle_cast, 2, stack)
+
+  def genserver_callback_clauses(module, fun, arity, stack) do
+    case ParallelChecker.fetch_export(stack.cache, module, fun, arity, false) do
+      {:ok, _, _, {_, _domain, clauses}} -> clauses
+      _ -> []
     end
   end
 

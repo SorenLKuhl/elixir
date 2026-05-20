@@ -549,6 +549,49 @@ defmodule Module.Types.Expr do
     Apply.fun(fun_type, args_types, call, stack, context)
   end
 
+  def of_expr({{:., _, [GenServer, :start_link]}, _meta, args} = call, _expected, _expr, stack, context) when stack.mode == :dynamic do
+    {_args_types, context} = Enum.map_reduce(args, context, &of_expr(&1, dynamic(), call, stack, &2))
+    # Find handle call signature in cache
+    handle_call_sig = Apply.handle_call_clauses(stack.module, stack)
+    handle_cast_sig = Apply.handle_cast_clauses(stack.module, stack)
+
+    # Extract request types from handle_call signature
+    call_msg_types = case Enum.map(handle_call_sig, fn {[request_type | _], _} -> request_type end) do
+      [] ->   # Is this ever hit?
+        none()
+      [:term] ->  # No def for call
+        none()
+      types -> 
+        Enum.reduce(types, &union/2)
+    end
+
+    # Extract request types from handle_cast signature
+    cast_msg_types = case Enum.map(handle_cast_sig, fn {[request_type | _], _} -> request_type end) do
+      [] ->   # Is this ever hit?
+        none()
+      [:term] ->  # No def for cast
+        none()
+      types -> 
+        Enum.reduce(types, &union/2)
+    end
+
+    # Extract the return type from handle_call signature
+    return_types = case Enum.map(handle_call_sig, fn {_, return_type} -> return_type end) do
+      [] ->
+        term()
+      types -> 
+        Enum.reduce(types, &union/2)
+    end
+
+    # Union the request types from both handle_call and handle_cast
+    msg_types = union(call_msg_types, cast_msg_types)
+
+    success_type = tuple([atom([:ok]), pid(msg_types, return_types)])
+    error_type = union(tuple([atom([:error]), term()]), atom([:ignore]))
+    
+    {union(success_type, error_type), context}
+  end
+
   def of_expr({{:., _, [callee, key_or_fun]}, meta, []} = call, expected, expr, stack, context)
       when not is_atom(callee) and is_atom(key_or_fun) do
     if Keyword.get(meta, :no_parens, false) do
@@ -1117,4 +1160,19 @@ defmodule Module.Types.Expr do
         ])
     }
   end
+  
+  #   ### Helper to get GenServer handle_call clauses in the given module.
+  # defp handle_call_clauses(module, stack),
+  #   do: genserver_callback_clauses(module, :handle_call, 3, stack)
+
+  # defp handle_cast_clauses(module, stack),
+  #   do: genserver_callback_clauses(module, :handle_cast, 2, stack)
+
+  # defp genserver_callback_clauses(module, fun, arity, stack) do
+  #   case ParallelChecker.fetch_export(stack.cache, module, fun, arity, false) do
+  #     {:ok, _, _, {_, _domain, clauses}} -> clauses
+  #     _ -> []
+  #   end
+  # end
+
 end
