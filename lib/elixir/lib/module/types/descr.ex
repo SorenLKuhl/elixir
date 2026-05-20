@@ -55,7 +55,7 @@ defmodule Module.Types.Descr do
   @non_empty_list_top {:term, :term}
   @tuple_top {:open, []}
   @map_empty {:closed, @fields_new}
-  @pid_top {%{}, :none}
+  @pid_top {%{}, :term}
 
   # The top BDD for each arity.
   @fun_bdd_top :bdd_top
@@ -112,7 +112,7 @@ defmodule Module.Types.Descr do
   def open_map(pairs), do: map_descr(:open, pairs)
   def open_tuple(elements, _fallback \\ term()), do: tuple_descr(:open, elements)
   def pid(), do: %{pid: @pid_top}
-  def pid(msg_type), do: %{pid: {msg_type, :none}}
+  def pid(msg_type), do: %{pid: {msg_type, :term}}
   def pid(msg_type, return_type), do: %{pid: {msg_type, return_type}}
   def port(), do: %{bitmap: @bit_port}
   def reference(), do: %{bitmap: @bit_reference}
@@ -2629,15 +2629,8 @@ defmodule Module.Types.Descr do
   ## Pid
   defp pid_union({msg1, ret1}, {msg2, ret2}) do
     msg = intersection(msg1, msg2)
-    # msg = union(msg1, msg2)
 
-    ret =
-      case {ret1, ret2} do
-        {:none, :none} -> :none
-        {:none, r} -> r
-        {r, :none} -> r
-        {r1, r2} -> union(r1, r2)
-      end
+    ret = union(ret1, ret2)
 
     {msg, ret}
   end
@@ -2646,13 +2639,7 @@ defmodule Module.Types.Descr do
     # pid(none()) is the TOP (all pids), so this is never empty.
     msg = union(msg1, msg2)
 
-    ret =
-      case {ret1, ret2} do
-        {:none, :none} -> :none
-        {:none, r} -> r
-        {r, :none} -> r
-        {r1, r2} -> intersection(r1, r2)
-      end
+    ret = intersection(ret1, ret2)
 
     {msg, ret}
   end
@@ -2662,19 +2649,19 @@ defmodule Module.Types.Descr do
   defp pid_empty?({_msg_type, _ret_type}), do: false
 
   # renders as  pid()  — both the sentinel :term and the top @none map render as untyped pid()
-  defp pid_to_quoted({msg_type, :none}, _opts) when msg_type == @none or msg_type == :term,
+  defp pid_to_quoted({msg_type, :term}, _opts) when msg_type == @none or msg_type == :term,
     do: [{:pid, [], []}]
 
   # renders as  pid(integer())
-  defp pid_to_quoted({msg_type, :none}, opts),
+  defp pid_to_quoted({msg_type, :term}, opts),
     do: [{:pid, [], [to_quoted(msg_type, opts)]}]
 
   # renders as  pid(integer(), atom())
   defp pid_to_quoted({msg_type, ret_type}, opts),
     do: [{:pid, [], [to_quoted(msg_type, opts), to_quoted(ret_type, opts)]}]
 
-  defp pid_difference({msg1, ret1}, {msg2, _ret2}) do
-    if subtype?(msg2, msg1), do: 0, else: {msg1, ret1}
+  defp pid_difference({msg1, ret1}, {msg2, ret2}) do
+    if subtype?(msg2, msg1) and subtype?(ret1, ret2), do: 0, else: {msg1, ret1}
   end
 
   # Returns :none if no pid component, :term if untyped pid(),
