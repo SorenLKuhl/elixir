@@ -822,15 +822,15 @@ defmodule Module.Types.Apply do
   end
 
   def remote_domain(GenServer, :call, [pid, msg], _expected, _meta, stack, context) do
-
     pid_type = literal_to_descr(pid, context)
     msg_type = literal_to_descr(msg, context)
 
-    dst = if is_strict?(Kernel.elem(stack.function,0)) do
-      pid(msg_type)
-    else
-      pid_type
-    end
+    dst =
+      if is_strict?(Kernel.elem(stack.function, 0)) do
+        pid(msg_type)
+      else
+        pid_type
+      end
 
     domain = [dst, term()]
 
@@ -838,15 +838,15 @@ defmodule Module.Types.Apply do
   end
 
   def remote_domain(GenServer, :call, [pid, msg, _timeout], _expected, _meta, stack, context) do
-
     pid_type = literal_to_descr(pid, context)
     msg_type = literal_to_descr(msg, context)
 
-    dst = if is_strict?(Kernel.elem(stack.function,0)) do
-      pid(msg_type)
-    else
-      pid_type
-    end
+    dst =
+      if is_strict?(Kernel.elem(stack.function, 0)) do
+        pid(msg_type)
+      else
+        pid_type
+      end
 
     domain = [dst, term(), integer()]
 
@@ -854,15 +854,15 @@ defmodule Module.Types.Apply do
   end
 
   def remote_domain(GenServer, :cast, [pid, msg], _expected, _meta, stack, context) do
-
     pid_type = literal_to_descr(pid, context)
     msg_type = literal_to_descr(msg, context)
 
-    dst = if is_strict?(Kernel.elem(stack.function,0)) do
-      pid(msg_type)
-    else
-      pid_type
-    end
+    dst =
+      if is_strict?(Kernel.elem(stack.function, 0)) do
+        pid(msg_type)
+      else
+        pid_type
+      end
 
     domain = [dst, term()]
 
@@ -872,11 +872,12 @@ defmodule Module.Types.Apply do
   def remote_domain(:erlang, :send, [_dest, msg], _expected, _meta, stack, context) do
     msg_type = literal_to_descr(msg, context)
 
-    dst = if is_strict?(Kernel.elem(stack.function,0)) do
-      difference(@send_destination, pid()) |> union(pid(msg_type))
-    else
-      @send_destination
-    end
+    dst =
+      if is_strict?(Kernel.elem(stack.function, 0)) do
+        difference(@send_destination, pid()) |> union(pid(msg_type))
+      else
+        @send_destination
+      end
 
     domain = [dst, term()]
     {{:strong, nil, [{domain, dynamic()}]}, domain, context}
@@ -1253,22 +1254,21 @@ defmodule Module.Types.Apply do
     remote_apply_genserver_call(pid_type, request_type, stack)
   end
 
-
   defp remote_apply(GenServer, :cast, _info, [pid_type, request_type], stack) do
     pid_msg_type = pid_message_type(pid_type)
-
-    pid_ret_type = pid_return_type(pid_type)
 
     case pid_msg_type do
       :none ->
         # If we don't know the message type, we can't infer anything about the return type
         {:ok, dynamic()}
 
-      msg_type ->
+      _ ->
         if subtype?(request_type, pid_msg_type) do
           {:ok, atom([:ok])}
         else
-          {:error, {:bad_genserver_call, stack.module, request_type, handle_cast_clauses(stack.module, stack)}}
+          {:error,
+           {:bad_genserver_call, stack.module, request_type,
+            handle_cast_clauses(stack.module, stack)}}
         end
     end
   end
@@ -2326,7 +2326,6 @@ defmodule Module.Types.Apply do
 
   ### GenServer Helpers
 
-
   # Helper for GenServer.call type inference
   defp remote_apply_genserver_call(pid_type, request_type, stack) do
     pid_msg_type = pid_message_type(pid_type)
@@ -2342,11 +2341,12 @@ defmodule Module.Types.Apply do
         if subtype?(request_type, pid_msg_type) do
           {:ok, return(pid_ret_type, [pid_type, request_type], stack)}
         else
-          {:error, {:bad_genserver_call, stack.module, request_type, handle_call_clauses(stack.module, stack)}}
+          {:error,
+           {:bad_genserver_call, stack.module, request_type,
+            handle_call_clauses(stack.module, stack)}}
         end
     end
   end
-
 
   def handle_call_clauses(module, stack),
     do: genserver_callback_clauses(module, :handle_call, 3, stack)
@@ -2373,10 +2373,12 @@ defmodule Module.Types.Apply do
   defp literal_to_descr([], _context), do: empty_list()
 
   # look up var in context, if not found, treat as term()
-  defp literal_to_descr({_name, [{_, version} | _] = _meta, _} = literal, context) when is_var(literal) do
+  defp literal_to_descr({_name, [{_, version} | _] = _meta, _} = literal, context)
+       when is_var(literal) do
     case context.vars do
       %{^version => %{type: type}} ->
         type
+
       _ ->
         term()
     end
@@ -2399,7 +2401,7 @@ defmodule Module.Types.Apply do
     do: tuple([literal_to_descr(left, context), literal_to_descr(right, context)])
 
   defp literal_to_descr({:{}, _meta, entries}, context) when is_list(entries) do
-    tuple(Enum.map(entries, &(literal_to_descr(&1, context))))
+    tuple(Enum.map(entries, &literal_to_descr(&1, context)))
   end
 
   defp literal_to_descr({:%{}, _meta, entries}, context) when is_list(entries) do

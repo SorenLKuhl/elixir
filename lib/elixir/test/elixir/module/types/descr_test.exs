@@ -956,7 +956,6 @@ defmodule Module.Types.DescrTest do
     end
 
     test "pid" do
-
       top_pid = pid()
       term_pid = pid(term())
       int_pid = pid(integer())
