@@ -822,7 +822,7 @@ defmodule Module.Types.Apply do
   end
 
   def remote_domain(GenServer, :call, [pid, msg], _expected, _meta, stack, context) do
-    
+
     pid_type = literal_to_descr(pid, context)
     msg_type = literal_to_descr(msg, context)
 
@@ -2340,7 +2340,6 @@ defmodule Module.Types.Apply do
 
       _ ->
         if subtype?(request_type, pid_msg_type) do
-          IO.puts("Pid ret type: #{inspect(pid_ret_type, pretty: true)}")
           {:ok, return(pid_ret_type, [pid_type, request_type], stack)}
         else
           {:error, {:bad_genserver_call, stack.module, request_type, handle_call_clauses(stack.module, stack)}}
@@ -2380,9 +2379,9 @@ defmodule Module.Types.Apply do
         type
       _ ->
         term()
-    end    
+    end
   end
-  
+
   defp literal_to_descr(list, context) when is_list(list) do
     {prefix, suffix} = unpack_list(list, [])
 
