@@ -2374,7 +2374,7 @@ defmodule Module.Types.Apply do
   defp literal_to_descr([], _context), do: empty_list()
 
   # look up var in context, if not found, treat as term()
-  defp literal_to_descr({_name, [{_, version} | _] = _meta, _} = _literal, context) when is_var(literal) do
+  defp literal_to_descr({_name, [{_, version} | _] = _meta, _} = literal, context) when is_var(literal) do
     case context.vars do
       %{^version => %{type: type}} ->
         type
@@ -2389,7 +2389,7 @@ defmodule Module.Types.Apply do
     head_type =
       case prefix do
         [] -> term()
-        _ -> prefix |> Enum.map(&literal_to_descr/2) |> Enum.reduce(&union/2)
+        _ -> prefix |> Enum.map(&literal_to_descr(&1, context)) |> Enum.reduce(&union/2)
       end
 
     suffix_type = if suffix == [], do: empty_list(), else: literal_to_descr(suffix, context)

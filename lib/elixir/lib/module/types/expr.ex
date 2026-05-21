@@ -575,11 +575,17 @@ defmodule Module.Types.Expr do
         Enum.reduce(types, &union/2)
     end
 
-    # Extract the return type from handle_call signature
-    return_types = case Enum.map(handle_call_sig, fn {_, return_type} -> return_type end) do
+    # Extract the reply value from {:reply, result, state} clauses only
+    return_types = case Enum.map(handle_call_sig, fn {_, return_type} ->
+      reply_shape = open_tuple([atom([:reply])])
+      case tuple_fetch(intersection(return_type, reply_shape), 1) do
+        {_, type} -> type
+        _ -> none()
+      end
+    end) do
       [] ->
         term()
-      types -> 
+      types ->
         Enum.reduce(types, &union/2)
     end
 
