@@ -956,15 +956,18 @@ defmodule Module.Types.DescrTest do
     end
 
     test "pid" do
+
+      top_pid = pid()
       term_pid = pid(term())
       int_pid = pid(integer())
       num_pid = pid(number())
-      none_pid = pid()
 
       assert subtype?(num_pid, int_pid)
-      assert subtype?(num_pid, none_pid)
+      assert subtype?(num_pid, top_pid)
+      assert subtype?(term_pid, top_pid)
       refute subtype?(int_pid, num_pid)
       refute subtype?(int_pid, term_pid)
+      refute subtype?(top_pid, term_pid)
 
       num_to_num = pid(integer(), number())
       num_to_int = pid(number(), integer())

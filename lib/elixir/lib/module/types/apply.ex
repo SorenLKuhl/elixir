@@ -823,8 +823,8 @@ defmodule Module.Types.Apply do
 
   def remote_domain(GenServer, :call, [pid, msg], _expected, _meta, stack, context) do
     
-    pid_type = literal_to_descr(pid)
-    msg_type = literal_to_descr(msg)
+    pid_type = literal_to_descr(pid, context)
+    msg_type = literal_to_descr(msg, context)
 
     dst = if is_strict?(Kernel.elem(stack.function,0)) do
       pid(msg_type)
@@ -839,8 +839,8 @@ defmodule Module.Types.Apply do
 
   def remote_domain(GenServer, :call, [pid, msg, _timeout], _expected, _meta, stack, context) do
 
-    pid_type = literal_to_descr(pid)
-    msg_type = literal_to_descr(msg)
+    pid_type = literal_to_descr(pid, context)
+    msg_type = literal_to_descr(msg, context)
 
     dst = if is_strict?(Kernel.elem(stack.function,0)) do
       pid(msg_type)
@@ -855,8 +855,8 @@ defmodule Module.Types.Apply do
 
   def remote_domain(GenServer, :cast, [pid, msg], _expected, _meta, stack, context) do
 
-    pid_type = literal_to_descr(pid)
-    msg_type = literal_to_descr(msg)
+    pid_type = literal_to_descr(pid, context)
+    msg_type = literal_to_descr(msg, context)
 
     dst = if is_strict?(Kernel.elem(stack.function,0)) do
       pid(msg_type)
@@ -870,7 +870,7 @@ defmodule Module.Types.Apply do
   end
 
   def remote_domain(:erlang, :send, [_dest, msg], _expected, _meta, stack, context) do
-    msg_type = literal_to_descr(msg)
+    msg_type = literal_to_descr(msg, context)
 
     dst = if is_strict?(Kernel.elem(stack.function,0)) do
       difference(@send_destination, pid()) |> union(pid(msg_type))
@@ -2338,8 +2338,9 @@ defmodule Module.Types.Apply do
         # If we don't know the message type, we can't infer anything about the return type
         {:ok, dynamic()}
 
-      _msg_type ->
+      _ ->
         if subtype?(request_type, pid_msg_type) do
+          IO.puts("Pid ret type: #{inspect(pid_ret_type, pretty: true)}")
           {:ok, return(pid_ret_type, [pid_type, request_type], stack)}
         else
           {:error, {:bad_genserver_call, stack.module, request_type, handle_call_clauses(stack.module, stack)}}
@@ -2362,40 +2363,50 @@ defmodule Module.Types.Apply do
   end
 
   # Convert quoted literals to their descriptor representation.
-  defp literal_to_descr(literal) when is_atom(literal), do: atom([literal])
-  defp literal_to_descr(literal) when is_integer(literal), do: integer()
-  defp literal_to_descr(literal) when is_float(literal), do: float()
-  defp literal_to_descr(literal) when is_binary(literal), do: binary()
+  defp literal_to_descr(literal, _context) when is_atom(literal), do: atom([literal])
+  defp literal_to_descr(literal, _context) when is_integer(literal), do: integer()
+  defp literal_to_descr(literal, _context) when is_float(literal), do: float()
+  defp literal_to_descr(literal, _context) when is_binary(literal), do: binary()
   # TODO: handle internal types of pid
-  defp literal_to_descr(literal) when is_pid(literal), do: pid()
-  defp literal_to_descr(literal) when is_port(literal), do: port()
-  defp literal_to_descr(literal) when is_reference(literal), do: reference()
-  defp literal_to_descr([]), do: empty_list()
+  defp literal_to_descr(literal, _context) when is_pid(literal), do: pid()
+  defp literal_to_descr(literal, _context) when is_port(literal), do: port()
+  defp literal_to_descr(literal, _context) when is_reference(literal), do: reference()
+  defp literal_to_descr([], _context), do: empty_list()
 
-  defp literal_to_descr(list) when is_list(list) do
+  # look up var in context, if not found, treat as term()
+  defp literal_to_descr({_name, [{_, version} | _] = _meta, _} = _literal, context) when is_var(literal) do
+    case context.vars do
+      %{^version => %{type: type}} ->
+        type
+      _ ->
+        term()
+    end    
+  end
+  
+  defp literal_to_descr(list, context) when is_list(list) do
     {prefix, suffix} = unpack_list(list, [])
 
     head_type =
       case prefix do
         [] -> term()
-        _ -> prefix |> Enum.map(&literal_to_descr/1) |> Enum.reduce(&union/2)
+        _ -> prefix |> Enum.map(&literal_to_descr/2) |> Enum.reduce(&union/2)
       end
 
-    suffix_type = if suffix == [], do: empty_list(), else: literal_to_descr(suffix)
+    suffix_type = if suffix == [], do: empty_list(), else: literal_to_descr(suffix, context)
     non_empty_list(head_type, suffix_type)
   end
 
-  defp literal_to_descr({left, right}),
-    do: tuple([literal_to_descr(left), literal_to_descr(right)])
+  defp literal_to_descr({left, right}, context),
+    do: tuple([literal_to_descr(left, context), literal_to_descr(right, context)])
 
-  defp literal_to_descr({:{}, _meta, entries}) when is_list(entries) do
-    tuple(Enum.map(entries, &literal_to_descr/1))
+  defp literal_to_descr({:{}, _meta, entries}, context) when is_list(entries) do
+    tuple(Enum.map(entries, &(literal_to_descr(&1, context))))
   end
 
-  defp literal_to_descr({:%{}, _meta, entries}) when is_list(entries) do
+  defp literal_to_descr({:%{}, _meta, entries}, context) when is_list(entries) do
     known_entries =
       Enum.flat_map(entries, fn
-        {key, value} when is_atom(key) -> [{key, literal_to_descr(value)}]
+        {key, value} when is_atom(key) -> [{key, literal_to_descr(value, context)}]
         _ -> []
       end)
 
@@ -2405,5 +2416,5 @@ defmodule Module.Types.Apply do
     end
   end
 
-  defp literal_to_descr(_other), do: term()
+  defp literal_to_descr(_other, _context), do: term()
 end
