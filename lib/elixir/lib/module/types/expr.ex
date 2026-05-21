@@ -549,11 +549,11 @@ defmodule Module.Types.Expr do
     Apply.fun(fun_type, args_types, call, stack, context)
   end
 
-  def of_expr({{:., _, [GenServer, :start_link]}, _meta, args} = call, _expected, _expr, stack, context) when stack.mode == :dynamic do
+  def of_expr({{:., _, [GenServer, :start_link]}, _meta,[mod | _] = args} = call, _expected, _expr, stack, context) when stack.mode == :dynamic do
     {_args_types, context} = Enum.map_reduce(args, context, &of_expr(&1, dynamic(), call, stack, &2))
     # Find handle call signature in cache
-    handle_call_sig = Apply.handle_call_clauses(stack.module, stack)
-    handle_cast_sig = Apply.handle_cast_clauses(stack.module, stack)
+    handle_call_sig = Apply.handle_call_clauses(mod, stack)
+    handle_cast_sig = Apply.handle_cast_clauses(mod, stack)
 
     # Extract request types from handle_call signature
     call_msg_types = case Enum.map(handle_call_sig, fn {[request_type | _], _} -> request_type end) do
