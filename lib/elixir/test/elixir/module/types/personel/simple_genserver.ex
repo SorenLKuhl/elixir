@@ -6,8 +6,8 @@ defmodule SimpleGenServer do
     pid
   end
 
-  def add_one(pid) do
-    GenServer.call(pid, {:add_one, "Hello world"})
+  def strict_add_one(pid, x) do
+    GenServer.call(pid, {:add_one, x})
   end
 
   @impl true
@@ -22,8 +22,9 @@ defmodule SimpleGenServer do
 
   def main do
     pid = start_link()
-    x = GenServer.call(pid, {:add_one, 1})
+    # x = GenServer.call(pid, {:add_one, 1})
+    # x <> "Hello world"
+    x = strict_add_one(pid, 42)
     x <> "Hello world"
-    # add_one(pid)
   end
 end

@@ -1268,7 +1268,7 @@ defmodule Module.Types.Apply do
         else
           {:error,
            {:bad_genserver_call, stack.module, request_type,
-            handle_cast_clauses(stack.module, stack)}}
+            genserver_callback_clauses(stack.module, :handle_cast, 2, stack)}}
         end
     end
   end
@@ -2324,6 +2324,9 @@ defmodule Module.Types.Apply do
     end
   end
 
+  # THESIS CHANGE: new GenServer helper section — remote_apply_genserver_call,
+  # handle_call_clauses, handle_cast_clauses, genserver_callback_clauses,
+  # and literal_to_descr family for converting quoted AST literals to type descriptors
   ### GenServer Helpers
 
   # Helper for GenServer.call type inference
@@ -2343,16 +2346,10 @@ defmodule Module.Types.Apply do
         else
           {:error,
            {:bad_genserver_call, stack.module, request_type,
-            handle_call_clauses(stack.module, stack)}}
+            genserver_callback_clauses(stack.module, :handle_call, 3, stack)}}
         end
     end
   end
-
-  def handle_call_clauses(module, stack),
-    do: genserver_callback_clauses(module, :handle_call, 3, stack)
-
-  def handle_cast_clauses(module, stack),
-    do: genserver_callback_clauses(module, :handle_cast, 2, stack)
 
   def genserver_callback_clauses(module, fun, arity, stack) do
     case ParallelChecker.fetch_export(stack.cache, module, fun, arity, false) do

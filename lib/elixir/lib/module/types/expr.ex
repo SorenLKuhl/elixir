@@ -561,54 +561,35 @@ defmodule Module.Types.Expr do
       Enum.map_reduce(args, context, &of_expr(&1, dynamic(), call, stack, &2))
 
     # Find handle call signature in cache
-    handle_call_sig = Apply.handle_call_clauses(mod, stack)
-    handle_cast_sig = Apply.handle_cast_clauses(mod, stack)
-
-    # Extract request types from handle_call signature
-    call_msg_types =
-      case Enum.map(handle_call_sig, fn {[request_type | _], _} -> request_type end) do
-        # Is this ever hit?
-        [] ->
-          none()
-
-        # No def for call
-        [:term] ->
-          none()
-
-        types ->
-          Enum.reduce(types, &union/2)
-      end
+    handle_call_sig = Apply.genserver_callback_clauses(mod, :handle_call, 3, stack)
+    handle_cast_sig = Apply.genserver_callback_clauses(mod, :handle_cast, 2, stack)
 
     # Extract request types from handle_cast signature
     cast_msg_types =
       case Enum.map(handle_cast_sig, fn {[request_type | _], _} -> request_type end) do
-        # Is this ever hit?
-        [] ->
-          none()
-
-        # No def for cast
-        [:term] ->
-          none()
-
-        types ->
-          Enum.reduce(types, &union/2)
+        [] -> none()
+        [:term] -> none()
+        types -> Enum.reduce(types, &union/2)
       end
 
-    # Extract the reply value from {:reply, result, state} clauses only
-    return_types =
-      case Enum.map(handle_call_sig, fn {_, return_type} ->
-             reply_shape = open_tuple([atom([:reply])])
+    # Extract call request types and reply return types in one pass over handle_call_sig
+    reply_shape = open_tuple([atom([:reply])])
 
-             case tuple_fetch(intersection(return_type, reply_shape), 1) do
-               {_, type} -> type
-               _ -> none()
-             end
-           end) do
+    {call_msg_types, return_types} =
+      case handle_call_sig do
         [] ->
-          term()
+          {none(), term()}
 
-        types ->
-          Enum.reduce(types, &union/2)
+        sig ->
+          Enum.reduce(sig, {none(), none()}, fn {[request_type | _], return_type}, {msgs, rets} ->
+            ret =
+              case tuple_fetch(intersection(return_type, reply_shape), 1) do
+                {_, type} -> type
+                _ -> none()
+              end
+
+            {union(msgs, request_type), union(rets, ret)}
+          end)
       end
 
     # Union the request types from both handle_call and handle_cast
