@@ -575,27 +575,27 @@ defmodule Module.Types.Expr do
     # Extract call request types and reply return types in one pass over handle_call_sig
     reply_shape = open_tuple([atom([:reply])])
 
-    {call_msg_types, return_types} =
+    {call_msg_types, call_sigs} =
       case handle_call_sig do
         [] ->
-          {none(), term()}
+          {none(), fun()}
 
         sig ->
-          Enum.reduce(sig, {none(), none()}, fn {[request_type | _], return_type}, {msgs, rets} ->
+          Enum.reduce(sig, {none(), fun()}, fn {[request_type | _], return_type}, {msgs, rets} ->
             ret =
               case tuple_fetch(intersection(return_type, reply_shape), 1) do
                 {_, type} -> type
                 _ -> none()
               end
 
-            {union(msgs, request_type), union(rets, ret)}
+            {none(), intersection(rets, fun([request_type], ret))}
           end)
       end
 
     # Union the request types from both handle_call and handle_cast
     msg_types = union(call_msg_types, cast_msg_types)
 
-    success_type = tuple([atom([:ok]), pid(msg_types, return_types)])
+    success_type = tuple([atom([:ok]), pid(msg_types, call_sigs)])
     error_type = union(tuple([atom([:error]), term()]), atom([:ignore]))
 
     {union(success_type, error_type), context}

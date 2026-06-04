@@ -6,7 +6,7 @@ defmodule SimpleGenServer do
     pid
   end
 
-  def strict_add_one(pid, x) do
+  def strict_add_one(pid, x) when is_integer(x) do
     GenServer.call(pid, {:add_one, x})
   end
 
@@ -17,13 +17,18 @@ defmodule SimpleGenServer do
 
   @impl true
   def handle_call({:add_one, x}, _from, state) do
-    {:reply, x + 1, state}
+    {:reply, x + 1.1, state}
+  end
+
+  @impl true
+  def handle_call({:add_string, x}, _from, state) when is_binary(x) do
+    {:reply, x <> "Test", state}
   end
 
   def main do
     pid = start_link()
-    # x = GenServer.call(pid, {:add_one, 1})
-    # x <> "Hello world"
+    # x = GenServer.call(pid, {:add_string, "Hello"})
+    # x <> " world"
     x = strict_add_one(pid, 42)
     x <> "Hello world"
   end

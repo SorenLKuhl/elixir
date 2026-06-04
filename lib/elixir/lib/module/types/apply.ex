@@ -827,7 +827,7 @@ defmodule Module.Types.Apply do
 
     dst =
       if is_strict?(Kernel.elem(stack.function, 0)) do
-        pid(msg_type)
+        pid(none(), fun([msg_type], term()))
       else
         pid_type
       end
@@ -843,7 +843,7 @@ defmodule Module.Types.Apply do
 
     dst =
       if is_strict?(Kernel.elem(stack.function, 0)) do
-        pid(msg_type)
+        pid(none(), fun([msg_type], term()))
       else
         pid_type
       end
@@ -2333,20 +2333,20 @@ defmodule Module.Types.Apply do
   defp remote_apply_genserver_call(pid_type, request_type, stack) do
     pid_msg_type = pid_message_type(pid_type)
 
-    pid_ret_type = pid_return_type(pid_type)
-
     case pid_msg_type do
       :none ->
-        # If we don't know the message type, we can't infer anything about the return type
         {:ok, dynamic()}
 
       _ ->
-        if subtype?(request_type, pid_msg_type) do
-          {:ok, return(pid_ret_type, [pid_type, request_type], stack)}
+        pid_call_sigs = pid_call_sigs(pid_type)
+
+        if pid_call_sigs == :term or pid_call_sigs == fun() do
+          {:ok, dynamic()}
         else
-          {:error,
-           {:bad_genserver_call, stack.module, request_type,
-            genserver_callback_clauses(stack.module, :handle_call, 3, stack)}}
+          case fun_apply(pid_call_sigs, [request_type]) do
+            {:ok, value} -> {:ok, value}
+            reason -> {:error, {:badapply, pid_call_sigs, [], reason}}
+          end
         end
     end
   end

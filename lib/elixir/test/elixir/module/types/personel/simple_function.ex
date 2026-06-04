@@ -1,5 +1,9 @@
 defmodule SimpleFunction do
   def add_one(x) do
+    nested_add_one(x)
+  end
+
+  def nested_add_one(x) do
     x + 1
   end
 

@@ -55,7 +55,7 @@ defmodule Module.Types.Descr do
   @non_empty_list_top {:term, :term}
   @tuple_top {:open, []}
   @map_empty {:closed, @fields_new}
-  @pid_top {%{}, :term}
+  @pid_top {%{}, %{fun: @fun_top}}
 
   # The top BDD for each arity.
   @fun_bdd_top :bdd_top
@@ -112,7 +112,7 @@ defmodule Module.Types.Descr do
   def open_map(pairs), do: map_descr(:open, pairs)
   def open_tuple(elements, _fallback \\ term()), do: tuple_descr(:open, elements)
   def pid(), do: %{pid: @pid_top}
-  def pid(msg_type), do: %{pid: {msg_type, :term}}
+  def pid(msg_type), do: %{pid: {msg_type, fun()}}
   def pid(msg_type, return_type), do: %{pid: {msg_type, return_type}}
   def port(), do: %{bitmap: @bit_port}
   def reference(), do: %{bitmap: @bit_reference}
@@ -2627,20 +2627,16 @@ defmodule Module.Types.Descr do
   defp pop_elem([], _key, acc), do: {false, :lists.reverse(acc)}
 
   ## Pid
-  defp pid_union({msg1, ret1}, {msg2, ret2}) do
+  defp pid_union({msg1, call_sigs1}, {msg2, call_sigs2}) do
     msg = intersection(msg1, msg2)
-
-    ret = union(ret1, ret2)
-
+    ret = union(call_sigs1, call_sigs2)
     {msg, ret}
   end
 
-  defp pid_intersection({msg1, ret1}, {msg2, ret2}) do
+  defp pid_intersection({msg1, call_sigs1}, {msg2, call_sigs2}) do
     # pid(none()) is the TOP (all pids), so this is never empty.
     msg = union(msg1, msg2)
-
-    ret = intersection(ret1, ret2)
-
+    ret = intersection(call_sigs1, call_sigs2)
     {msg, ret}
   end
 
@@ -2657,17 +2653,17 @@ defmodule Module.Types.Descr do
     do: [{:pid, [], [to_quoted(msg_type, opts)]}]
 
   # renders as  pid(integer(), atom())
-  defp pid_to_quoted({msg_type, ret_type}, opts),
-    do: [{:pid, [], [to_quoted(msg_type, opts), to_quoted(ret_type, opts)]}]
+  defp pid_to_quoted({msg_type, call_sigs}, opts),
+    do: [{:pid, [], [to_quoted(msg_type, opts), to_quoted(call_sigs, opts)]}]
 
-  defp pid_difference({msg1, ret1}, {msg2, ret2}) do
-    if subtype?(msg2, msg1) and subtype?(ret1, ret2), do: 0, else: {msg1, ret1}
+  defp pid_difference({msg1, call_sigs1}, {msg2, call_sigs2}) do
+    if subtype?(msg2, msg1) and subtype?(call_sigs1, call_sigs2), do: 0, else: {msg1, call_sigs1}
   end
 
   # Returns :none if no pid component, :term if untyped pid(),
   # or the message descr if typed pid(T).
   # def pid_message_type(%{pid: {msg_type, _ret_type}}), do: msg_type
-  def pid_message_type(%{pid: {msg_type, _ret_type}}) do
+  def pid_message_type(%{pid: {msg_type, _call_sigs}}) do
     if empty?(msg_type), do: :none, else: msg_type
   end
 
@@ -2687,21 +2683,20 @@ defmodule Module.Types.Descr do
   # TODO: If not used, could be removed
   # Returns :none if no pid component or no return type tracked,
   # :term if the global term type, or the return descr if typed pid(T, R).
-  def pid_return_type(%{pid: {_msg_type, ret_type}}), do: ret_type
+  def pid_call_sigs(%{pid: {_msg_type, call_sigs}}), do: call_sigs
   # term() contains pid()
-  def pid_return_type(:term), do: :term
-  def pid_return_type(%{dynamic: :term}), do: :term
-  def pid_return_type(%{dynamic: pid_type}), do: pid_return_type(pid_type)
+  def pid_call_sigs(:term), do: :term
+  def pid_call_sigs(%{dynamic: :term}), do: :term
+  def pid_call_sigs(%{dynamic: pid_type}), do: pid_call_sigs(pid_type)
 
-  def pid_return_type(%{map: {:closed, fields}}) when is_map(fields) do
+  def pid_call_sigs(%{map: {:closed, fields}}) when is_map(fields) do
     case Map.fetch(fields, :pid) do
-      {:ok, pid_type} -> pid_return_type(pid_type)
+      {:ok, pid_type} -> pid_call_sigs(pid_type)
       :error -> :none
     end
   end
 
-  def pid_return_type(_), do: :none
-
+  def pid_call_sigs(_), do: :none
   ## Dynamic
   #
   # A type with a dynamic component is a gradual type; without, it is a static
