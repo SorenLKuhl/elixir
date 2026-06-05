@@ -565,37 +565,41 @@ defmodule Module.Types.Expr do
     handle_cast_sig = Apply.genserver_callback_clauses(mod, :handle_cast, 2, stack)
 
     # Extract request types from handle_cast signature
-    cast_msg_types =
+    cast_sigs =
       case Enum.map(handle_cast_sig, fn {[request_type | _], _} -> request_type end) do
-        [] -> none()
-        [:term] -> none()
-        types -> Enum.reduce(types, &union/2)
+        [] ->
+          fun()
+
+        [:term] ->
+          fun([term()], atom([:ok]))
+
+        sigs ->
+          Enum.reduce(sigs, fun(), fn sig, cast_sigs_acc ->
+            intersection(cast_sigs_acc, fun([sig], atom([:ok])))
+          end)
       end
 
     # Extract call request types and reply return types in one pass over handle_call_sig
     reply_shape = open_tuple([atom([:reply])])
 
-    {call_msg_types, call_sigs} =
+    call_sigs =
       case handle_call_sig do
         [] ->
-          {none(), fun()}
+          {fun(), fun()}
 
         sig ->
-          Enum.reduce(sig, {none(), fun()}, fn {[request_type | _], return_type}, {msgs, rets} ->
+          Enum.reduce(sig, fun(), fn {[request_type | _], return_type}, call_sigs_acc ->
             ret =
               case tuple_fetch(intersection(return_type, reply_shape), 1) do
                 {_, type} -> type
                 _ -> none()
               end
 
-            {none(), intersection(rets, fun([request_type], ret))}
+            intersection(call_sigs_acc, fun([request_type], ret))
           end)
       end
 
-    # Union the request types from both handle_call and handle_cast
-    msg_types = union(call_msg_types, cast_msg_types)
-
-    success_type = tuple([atom([:ok]), pid(msg_types, call_sigs)])
+    success_type = tuple([atom([:ok]), pid(cast_sigs, call_sigs)])
     error_type = union(tuple([atom([:error]), term()]), atom([:ignore]))
 
     {union(success_type, error_type), context}
@@ -617,25 +621,25 @@ defmodule Module.Types.Expr do
   # This way we can reuse all the machinery we already have for processing receive clauses,
   # and we don't need to worry about sanitizing pinned vars or declaring body variables.
   # NOTE: this does not narrow the type based on the clause bodies.
-  def of_expr(
-        {{:., _, [:erlang, :spawn]}, _meta, [fun_arg]} = call,
-        _expected,
-        _expr,
-        stack,
-        context
-      ) do
-    # Add accumulator to context
-    context = Map.put(context, :receive_acc, none())
+  # def of_expr(
+  #       {{:., _, [:erlang, :spawn]}, _meta, [fun_arg]} = call,
+  #       _expected,
+  #       _expr,
+  #       stack,
+  #       context
+  #     ) do
+  #   # Add accumulator to context
+  #   context = Map.put(context, :receive_acc, none())
 
-    # Process the fun_arg passed to spawn/1 to fill the receive_acc
-    {_fun_type, context} = of_expr(fun_arg, dynamic(fun(0)), call, stack, context)
+  #   # Process the fun_arg passed to spawn/1 to fill the receive_acc
+  #   {_fun_type, context} = of_expr(fun_arg, dynamic(fun(0)), call, stack, context)
 
-    # Retrieve the accepted message types
-    msg_type = context.receive_acc
+  #   # Retrieve the accepted message types
+  #   msg_type = context.receive_acc
 
-    # Remove the receive accumulator as to not mess up other receive clauses
-    {pid(msg_type), Map.delete(context, :receive_acc)}
-  end
+  #   # Remove the receive accumulator as to not mess up other receive clauses
+  #   {pid(msg_type), Map.delete(context, :receive_acc)}
+  # end
 
   def of_expr({{:., _, [remote, name]}, meta, args} = call, expected, _expr, stack, context) do
     {remote_type, context} = of_expr(remote, atom(), call, stack, context)

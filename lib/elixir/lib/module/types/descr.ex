@@ -55,7 +55,7 @@ defmodule Module.Types.Descr do
   @non_empty_list_top {:term, :term}
   @tuple_top {:open, []}
   @map_empty {:closed, @fields_new}
-  @pid_top {%{}, %{fun: @fun_top}}
+  @pid_top {%{fun: @fun_top}, %{fun: @fun_top}}
 
   # The top BDD for each arity.
   @fun_bdd_top :bdd_top
@@ -2627,15 +2627,15 @@ defmodule Module.Types.Descr do
   defp pop_elem([], _key, acc), do: {false, :lists.reverse(acc)}
 
   ## Pid
-  defp pid_union({msg1, call_sigs1}, {msg2, call_sigs2}) do
-    msg = intersection(msg1, msg2)
+  defp pid_union({cast_sigs1, call_sigs1}, {cast_sigs2, call_sigs2}) do
+    msg = union(cast_sigs1, cast_sigs2)
     ret = union(call_sigs1, call_sigs2)
     {msg, ret}
   end
 
-  defp pid_intersection({msg1, call_sigs1}, {msg2, call_sigs2}) do
+  defp pid_intersection({cast_sigs1, call_sigs1}, {cast_sigs2, call_sigs2}) do
     # pid(none()) is the TOP (all pids), so this is never empty.
-    msg = union(msg1, msg2)
+    msg = intersection(cast_sigs1, cast_sigs2)
     ret = intersection(call_sigs1, call_sigs2)
     {msg, ret}
   end
@@ -2657,29 +2657,29 @@ defmodule Module.Types.Descr do
     do: [{:pid, [], [to_quoted(msg_type, opts), to_quoted(call_sigs, opts)]}]
 
   defp pid_difference({msg1, call_sigs1}, {msg2, call_sigs2}) do
-    if subtype?(msg2, msg1) and subtype?(call_sigs1, call_sigs2), do: 0, else: {msg1, call_sigs1}
+    if subtype?(msg1, msg2) and subtype?(call_sigs1, call_sigs2), do: 0, else: {msg1, call_sigs1}
   end
 
   # Returns :none if no pid component, :term if untyped pid(),
   # or the message descr if typed pid(T).
-  # def pid_message_type(%{pid: {msg_type, _ret_type}}), do: msg_type
-  def pid_message_type(%{pid: {msg_type, _call_sigs}}) do
-    if empty?(msg_type), do: :none, else: msg_type
+  # def pid_cast_sigs(%{pid: {msg_type, _ret_type}}), do: msg_type
+  def pid_cast_sigs(%{pid: {msg_type, _call_sigs}}) do
+    if empty?(msg_type), do: fun(), else: msg_type
   end
 
   # term() contains pid()
-  def pid_message_type(:term), do: :term
-  def pid_message_type(%{dynamic: :term}), do: :term
-  def pid_message_type(%{dynamic: pid_type}), do: pid_message_type(pid_type)
+  def pid_cast_sigs(:term), do: :term
+  def pid_cast_sigs(%{dynamic: :term}), do: :term
+  def pid_cast_sigs(%{dynamic: pid_type}), do: pid_cast_sigs(pid_type)
 
-  def pid_message_type(%{map: {:closed, fields}}) when is_map(fields) do
+  def pid_cast_sigs(%{map: {:closed, fields}}) when is_map(fields) do
     case Map.fetch(fields, :pid) do
-      {:ok, pid_type} -> pid_message_type(pid_type)
+      {:ok, pid_type} -> pid_cast_sigs(pid_type)
       :error -> :none
     end
   end
 
-  def pid_message_type(_), do: :none
+  def pid_cast_sigs(_), do: :none
   # TODO: If not used, could be removed
   # Returns :none if no pid component or no return type tracked,
   # :term if the global term type, or the return descr if typed pid(T, R).
