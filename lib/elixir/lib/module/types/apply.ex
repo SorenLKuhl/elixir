@@ -548,6 +548,7 @@ defmodule Module.Types.Apply do
 
   defp do_remote(GenServer, :call, [pid, msg], _expected, expr, stack, context, of_fun) do
     {msg_type, context} = of_fun.(msg, term(), expr, stack, context)
+
     pid_expected =
       if is_strict?(Kernel.elem(stack.function, 0)) do
         pid(msg_type)
@@ -594,24 +595,7 @@ defmodule Module.Types.Apply do
 
     {pid_type, context} = of_fun.(pid, pid_expected, expr, stack, context)
 
-    pid_msg_type = pid_message_type(pid_type)
-
-    result =
-      case pid_msg_type do
-        :none -> {:ok, dynamic()}
-        :term -> {:ok, dynamic()}
-
-        _ ->
-          if subtype?(msg_type, pid_msg_type) do
-            {:ok, atom([:ok])}
-          else
-            {:error,
-             {:bad_genserver_call, stack.module, msg_type,
-              genserver_callback_clauses(stack.module, :handle_cast, 2, stack)}}
-          end
-      end
-
-    case result do
+    case remote_apply_genserver_cast(pid_type, msg_type, stack) do
       {:ok, type} -> {return(type, [pid_type, msg_type], stack), context}
       {:error, error} -> remote_error(error, GenServer, :cast, 2, expr, stack, context)
     end
@@ -2245,6 +2229,34 @@ defmodule Module.Types.Apply do
   end
 
   def format_diagnostic(
+        {{:bad_genserver_cast, _module, request_type, clauses}, mfac, expr, context}
+      ) do
+    {mod, fun, arity, _converter} = mfac
+    mfa = Exception.format_mfa(mod, fun, arity)
+    traces = collect_traces(expr, context)
+
+    %{
+      details: %{typing_traces: traces},
+      message:
+        IO.iodata_to_binary([
+          """
+          incompatible request type given to #{mfa}:
+
+              #{expr_to_string(expr) |> indent(4)}
+
+          given type:
+
+              #{to_quoted_string(request_type) |> indent(4)}
+
+          but expected a request type that matches one of the following clauses:
+          """,
+          format_traces(traces),
+          clauses_args_to_quoted_string(clauses, &Function.identity/1, collapse_structs: true)
+        ])
+    }
+  end
+
+  def format_diagnostic(
         {{:bad_typed_pid_send, dest_type, msg_type, expected_type}, mfac, expr, context}
       ) do
     {mod, fun, arity, _} = mfac
@@ -2418,6 +2430,24 @@ defmodule Module.Types.Apply do
           {:error,
            {:bad_genserver_call, stack.module, request_type,
             genserver_callback_clauses(stack.module, :handle_call, 3, stack)}}
+        end
+    end
+  end
+
+  defp remote_apply_genserver_cast(pid_type, request_type, stack) do
+    pid_msg_type = pid_message_type(pid_type)
+
+    case pid_msg_type do
+      :none ->
+        {:ok, dynamic()}
+
+      _ ->
+        if subtype?(request_type, pid_msg_type) do
+          {:ok, atom([:ok])}
+        else
+          {:error,
+           {:bad_genserver_cast, stack.module, request_type,
+            genserver_callback_clauses(stack.module, :handle_cast, 2, stack)}}
         end
     end
   end
