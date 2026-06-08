@@ -592,6 +592,13 @@ defmodule Module.Types.Expr do
           end)
       end
 
+    call_msg_types =
+      if return_types == none() and call_msg_types == term() do
+        none()
+      else
+        call_msg_types
+      end
+
     # Union the request types from both handle_call and handle_cast
     msg_types = union(call_msg_types, cast_msg_types)
 

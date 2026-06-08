@@ -2443,7 +2443,7 @@ defmodule Module.Types.Apply do
 
       _ ->
         if subtype?(request_type, pid_msg_type) do
-          {:ok, atom([:ok])}
+          {:ok, return(atom([:ok]), [pid_type, request_type], stack)}
         else
           {:error,
            {:bad_genserver_cast, stack.module, request_type,
