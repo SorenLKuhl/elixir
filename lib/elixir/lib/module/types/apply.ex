@@ -594,7 +594,13 @@ defmodule Module.Types.Apply do
       end
 
     {pid_type, context} = of_fun.(pid, pid_expected, expr, stack, context)
-    pid_cast_sigs = pid_cast_sigs(pid_type)
+
+    pid_cast_sigs =
+      if is_strict?(Kernel.elem(stack.function, 0)) do
+        lower_bound(pid_cast_sigs(pid_type))
+      else
+        pid_cast_sigs(pid_type)
+      end
 
     result =
       if pid_cast_sigs == :none or pid_cast_sigs == :term or pid_cast_sigs == fun() do
