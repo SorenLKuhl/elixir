@@ -560,49 +560,8 @@ defmodule Module.Types.Expr do
     {_args_types, context} =
       Enum.map_reduce(args, context, &of_expr(&1, dynamic(), call, stack, &2))
 
-    # Find handle call signature in cache
-    handle_call_sig = Apply.genserver_callback_clauses(mod, :handle_call, 3, stack)
-    handle_cast_sig = Apply.genserver_callback_clauses(mod, :handle_cast, 2, stack)
-
-    # Extract request types from handle_cast signature
-    cast_sigs =
-      case Enum.map(handle_cast_sig, fn {[request_type | _], _} -> request_type end) do
-        [] ->
-          fun()
-
-        [:term] ->
-          fun([term()], atom([:ok]))
-
-        sigs ->
-          Enum.reduce(sigs, fun(), fn sig, cast_sigs_acc ->
-            intersection(cast_sigs_acc, fun([sig], atom([:ok])))
-          end)
-      end
-
-    # Extract call request types and reply return types in one pass over handle_call_sig
-    reply_shape = open_tuple([atom([:reply])])
-
-    call_sigs =
-      case handle_call_sig do
-        [] ->
-          {fun(), fun()}
-
-        sig ->
-          Enum.reduce(sig, fun(), fn {[request_type | _], return_type}, call_sigs_acc ->
-            ret =
-              case tuple_fetch(intersection(return_type, reply_shape), 1) do
-                {_, type} -> type
-                _ -> none()
-              end
-
-            intersection(call_sigs_acc, fun([request_type], ret))
-          end)
-      end
-
-    success_type = tuple([atom([:ok]), pid(cast_sigs, call_sigs)])
-    error_type = union(tuple([atom([:error]), term()]), atom([:ignore]))
-
-    {union(success_type, error_type), context}
+    {pid_type, context} = Apply.self_pid_type(stack, context)
+    {tuple([atom([:ok]), pid_type]), context}
   end
 
   def of_expr({{:., _, [callee, key_or_fun]}, meta, []} = call, expected, expr, stack, context)

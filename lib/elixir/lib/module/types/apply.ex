@@ -549,11 +549,12 @@ defmodule Module.Types.Apply do
   defp do_remote(GenServer, :call, [pid, msg], _expected, expr, stack, context, of_fun) do
     {msg_type, context} = of_fun.(msg, term(), expr, stack, context)
 
-    pid_expected =
+    {pid_expected, context} =
       if is_strict?(Kernel.elem(stack.function, 0)) do
-        pid(fun(), fun([msg_type], term()))
+        self_pid_type(stack, context)
+        # pid(fun(), fun([msg_type], term()))
       else
-        pid()
+        {term(), context}
       end
 
     {pid_type, context} = of_fun.(pid, pid_expected, expr, stack, context)
@@ -567,11 +568,12 @@ defmodule Module.Types.Apply do
   defp do_remote(GenServer, :call, [pid, msg, timeout], _expected, expr, stack, context, of_fun) do
     {msg_type, context} = of_fun.(msg, term(), expr, stack, context)
 
-    pid_expected =
+    {pid_expected, context} =
       if is_strict?(Kernel.elem(stack.function, 0)) do
-        pid(fun(), fun([msg_type], term()))
+        self_pid_type(stack, context)
+        # pid(fun(), fun([msg_type], term()))
       else
-        term()
+        {term(), context}
       end
 
     {pid_type, context} = of_fun.(pid, pid_expected, expr, stack, context)
@@ -586,11 +588,12 @@ defmodule Module.Types.Apply do
   defp do_remote(GenServer, :cast, [pid, msg], _expected, expr, stack, context, of_fun) do
     {msg_type, context} = of_fun.(msg, term(), expr, stack, context)
 
-    pid_expected =
+    {pid_expected, context} =
       if is_strict?(Kernel.elem(stack.function, 0)) do
-        pid(fun([msg_type], term()), fun())
+        self_pid_type(stack, context)
+        # pid(fun([msg_type], atom([:ok])), fun())
       else
-        term()
+        {term(), context}
       end
 
     {pid_type, context} = of_fun.(pid, pid_expected, expr, stack, context)
@@ -2419,6 +2422,56 @@ defmodule Module.Types.Apply do
     case ParallelChecker.fetch_export(stack.cache, module, fun, arity, false) do
       {:ok, _, _, {_, _domain, clauses}} -> clauses
       _ -> []
+    end
+  end
+
+
+  def self_pid_type(stack, %{gen_server_pid_type: nil} = context) do
+    pid_type = genserver_pid_type(stack.module, stack)
+    {pid_type, %{context | gen_server_pid_type: pid_type}}
+  end
+
+  def self_pid_type(_stack, %{gen_server_pid_type: pid_type} = context) do
+    {pid_type, context}
+  end
+
+  defp genserver_pid_type(module, stack) do
+    cast_sigs = genserver_cast_sigs(module, stack)
+    call_sigs = genserver_call_sigs(module, stack)
+    # success_type = tuple([atom([:ok]), pid(cast_sigs, call_sigs)])
+    # error_type = union(tuple([atom([:error]), term()]), atom([:ignore]))
+    pid(cast_sigs, call_sigs)
+  end
+
+  defp genserver_cast_sigs(module, stack) do
+    case genserver_callback_clauses(module, :handle_cast, 2, stack) do
+      [] ->
+        fun()
+
+      clauses ->
+        Enum.reduce(clauses, fun(), fn {[request_type | _], _return_type}, acc ->
+          intersection(acc, fun([request_type], atom([:ok])))
+        end)
+    end
+  end
+
+  defp genserver_call_sigs(module, stack) do
+    reply_shape = open_tuple([atom([:reply])])
+
+    case genserver_callback_clauses(module, :handle_call, 3, stack) do
+      [] ->
+        fun()
+
+      clauses ->
+        Enum.reduce(clauses, fun(), fn {[request_type | _], return_type}, acc ->
+          response =
+            case tuple_fetch(intersection(return_type, reply_shape), 1) do
+              {_, type} -> type
+              _ -> none()
+            end
+
+          intersection(acc, fun([request_type], response))
+        end)
     end
   end
 

@@ -526,7 +526,9 @@ defmodule Module.Types do
       # Track which clauses have been used across private local calls
       local_used: %{},
       # Cached reverse arrows
-      reverse_arrows: %{}
+      reverse_arrows: %{},
+
+      gen_server_pid_type: nil
     }
   end
 
