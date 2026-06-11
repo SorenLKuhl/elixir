@@ -561,7 +561,10 @@ defmodule Module.Types.Expr do
       Enum.map_reduce(args, context, &of_expr(&1, dynamic(), call, stack, &2))
 
     {pid_type, context} = Apply.self_pid_type(stack, context)
-    {tuple([atom([:ok]), pid_type]), context}
+    success_type = tuple([atom([:ok]), pid_type])
+    error_type = union(tuple([atom([:error]), term()]), atom([:ignore]))
+
+    {union(success_type, error_type), context}
   end
 
   def of_expr({{:., _, [callee, key_or_fun]}, meta, []} = call, expected, expr, stack, context)
