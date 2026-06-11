@@ -112,8 +112,8 @@ defmodule Module.Types.Descr do
   def open_map(pairs), do: map_descr(:open, pairs)
   def open_tuple(elements, _fallback \\ term()), do: tuple_descr(:open, elements)
   def pid(), do: %{pid: @pid_top}
-  def pid(msg_type), do: %{pid: {msg_type, fun()}}
-  def pid(msg_type, return_type), do: %{pid: {msg_type, return_type}}
+  def pid(cast_sigs), do: %{pid: {cast_sigs, fun()}}
+  def pid(cast_sigs, call_sigs), do: %{pid: {cast_sigs, call_sigs}}
   def port(), do: %{bitmap: @bit_port}
   def reference(), do: %{bitmap: @bit_reference}
   def tuple(), do: %{tuple: @tuple_top}
@@ -2656,8 +2656,10 @@ defmodule Module.Types.Descr do
   defp pid_to_quoted({msg_type, call_sigs}, opts),
     do: [{:pid, [], [to_quoted(msg_type, opts), to_quoted(call_sigs, opts)]}]
 
-  defp pid_difference({msg1, call_sigs1}, {msg2, call_sigs2}) do
-    if subtype?(msg1, msg2) and subtype?(call_sigs1, call_sigs2), do: 0, else: {msg1, call_sigs1}
+  defp pid_difference({cast_sigs1, call_sigs1}, {cast_sigs2, call_sigs2}) do
+    if subtype?(cast_sigs1, cast_sigs2) and subtype?(call_sigs1, call_sigs2),
+      do: 0,
+      else: {cast_sigs1, call_sigs1}
   end
 
   # Returns :none if no pid component, :term if untyped pid(),

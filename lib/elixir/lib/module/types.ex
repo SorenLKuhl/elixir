@@ -527,7 +527,6 @@ defmodule Module.Types do
       local_used: %{},
       # Cached reverse arrows
       reverse_arrows: %{},
-
       gen_server_pid_type: nil
     }
   end

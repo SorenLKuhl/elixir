@@ -2425,7 +2425,6 @@ defmodule Module.Types.Apply do
     end
   end
 
-
   def self_pid_type(stack, %{gen_server_pid_type: nil} = context) do
     pid_type = genserver_pid_type(stack.module, stack)
     {pid_type, %{context | gen_server_pid_type: pid_type}}
