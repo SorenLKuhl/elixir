@@ -547,16 +547,16 @@ defmodule Module.Types.Apply do
   end
 
   defp do_remote(GenServer, :call, [pid, msg], _expected, expr, stack, context, of_fun) do
-    {msg_type, context} = of_fun.(msg, term(), expr, stack, context)
-
-    {pid_expected, context} =
+    {pid_expected, msg_expected, context} =
       if is_strict?(Kernel.elem(stack.function, 0)) do
-        self_pid_type(stack, context)
-        # pid(fun(), fun([msg_type], term()))
+        {pid_type, context} = self_pid_type(stack, context)
+        msg_expected = genserver_request_type(msg, stack.module, :handle_call, 3, stack, context)
+        {pid_type, msg_expected, context}
       else
-        {term(), context}
+        {term(), term(), context}
       end
 
+    {msg_type, context} = of_fun.(msg, msg_expected, expr, stack, context)
     {pid_type, context} = of_fun.(pid, pid_expected, expr, stack, context)
 
     case remote_apply_genserver_call(pid_type, msg_type, stack) do
@@ -566,16 +566,16 @@ defmodule Module.Types.Apply do
   end
 
   defp do_remote(GenServer, :call, [pid, msg, timeout], _expected, expr, stack, context, of_fun) do
-    {msg_type, context} = of_fun.(msg, term(), expr, stack, context)
-
-    {pid_expected, context} =
+    {pid_expected, msg_expected, context} =
       if is_strict?(Kernel.elem(stack.function, 0)) do
-        self_pid_type(stack, context)
-        # pid(fun(), fun([msg_type], term()))
+        {pid_type, context} = self_pid_type(stack, context)
+        msg_expected = genserver_request_type(msg, stack.module, :handle_call, 3, stack, context)
+        {pid_type, msg_expected, context}
       else
-        {term(), context}
+        {term(), term(), context}
       end
 
+    {msg_type, context} = of_fun.(msg, msg_expected, expr, stack, context)
     {pid_type, context} = of_fun.(pid, pid_expected, expr, stack, context)
     {timeout_type, context} = of_fun.(timeout, integer(), expr, stack, context)
 
@@ -586,16 +586,16 @@ defmodule Module.Types.Apply do
   end
 
   defp do_remote(GenServer, :cast, [pid, msg], _expected, expr, stack, context, of_fun) do
-    {msg_type, context} = of_fun.(msg, term(), expr, stack, context)
-
-    {pid_expected, context} =
+    {pid_expected, msg_expected, context} =
       if is_strict?(Kernel.elem(stack.function, 0)) do
-        self_pid_type(stack, context)
-        # pid(fun([msg_type], atom([:ok])), fun())
+        {pid_type, context} = self_pid_type(stack, context)
+        msg_expected = genserver_request_type(msg, stack.module, :handle_cast, 2, stack, context)
+        {pid_type, msg_expected, context}
       else
-        {term(), context}
+        {term(), term(), context}
       end
 
+    {msg_type, context} = of_fun.(msg, msg_expected, expr, stack, context)
     {pid_type, context} = of_fun.(pid, pid_expected, expr, stack, context)
 
     pid_cast_sigs =
@@ -2471,6 +2471,26 @@ defmodule Module.Types.Apply do
 
           intersection(acc, fun([request_type], response))
         end)
+    end
+  end
+
+  defp genserver_request_type(msg, module, callback, arity, stack, context) do
+    case genserver_callback_clauses(module, callback, arity, stack) do
+      [] ->
+        term()
+
+      clauses ->
+        shape = literal_to_descr(msg, context)
+
+        request_types =
+          case Enum.filter(clauses, fn {[request_type | _], _} ->
+                 not empty?(intersection(shape, request_type))
+               end) do
+            [] -> Enum.map(clauses, fn {[request_type | _], _} -> request_type end)
+            matching -> Enum.map(matching, fn {[request_type | _], _} -> request_type end)
+          end
+
+        Enum.reduce(request_types, none(), &union/2)
     end
   end
 
