@@ -555,8 +555,7 @@ defmodule Module.Types.Expr do
         _expr,
         stack,
         context
-      )
-      when stack.mode == :dynamic do
+      ) do
     {_args_types, context} =
       Enum.map_reduce(args, context, &of_expr(&1, dynamic(), call, stack, &2))
 

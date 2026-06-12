@@ -550,7 +550,7 @@ defmodule Module.Types.Apply do
     {pid_expected, msg_expected, context} =
       if is_strict?(Kernel.elem(stack.function, 0)) do
         {pid_type, context} = self_pid_type(stack, context)
-        msg_expected = genserver_request_type(msg, stack.module, :handle_call, 3, stack, context)
+        msg_expected = genserver_request_type(msg, :handle_call, 3, context)
         {pid_type, msg_expected, context}
       else
         {term(), term(), context}
@@ -569,7 +569,7 @@ defmodule Module.Types.Apply do
     {pid_expected, msg_expected, context} =
       if is_strict?(Kernel.elem(stack.function, 0)) do
         {pid_type, context} = self_pid_type(stack, context)
-        msg_expected = genserver_request_type(msg, stack.module, :handle_call, 3, stack, context)
+        msg_expected = genserver_request_type(msg, :handle_call, 3, context)
         {pid_type, msg_expected, context}
       else
         {term(), term(), context}
@@ -589,7 +589,7 @@ defmodule Module.Types.Apply do
     {pid_expected, msg_expected, context} =
       if is_strict?(Kernel.elem(stack.function, 0)) do
         {pid_type, context} = self_pid_type(stack, context)
-        msg_expected = genserver_request_type(msg, stack.module, :handle_cast, 2, stack, context)
+        msg_expected = genserver_request_type(msg, :handle_cast, 2, context)
         {pid_type, msg_expected, context}
       else
         {term(), term(), context}
@@ -2425,8 +2425,20 @@ defmodule Module.Types.Apply do
     end
   end
 
-  def self_pid_type(stack, %{gen_server_pid_type: nil} = context) do
-    pid_type = genserver_pid_type(stack.module, stack)
+  def genserver_callback_clauses(context, fun, arity) do
+    case context.local_sigs do
+      %{{^fun, ^arity} => {_kind, {:infer, _domain, clauses}, _mapping}} -> clauses
+      _ -> []
+    end
+  end
+
+  def self_pid_type(stack, %{gen_server_pid_type: nil} = context) when stack.mode == :infer do
+    pid_type = genserver_pid_type(context)
+    {pid_type, %{context | gen_server_pid_type: pid_type}}
+  end
+
+  def self_pid_type(stack, %{gen_server_pid_type: nil} = context) when stack.mode == :dynamic do
+    pid_type = genserver_pid_type_dynamic(stack.module, stack)
     {pid_type, %{context | gen_server_pid_type: pid_type}}
   end
 
@@ -2434,12 +2446,28 @@ defmodule Module.Types.Apply do
     {pid_type, context}
   end
 
-  defp genserver_pid_type(module, stack) do
+  defp genserver_pid_type(context) do
+    cast_sigs = genserver_cast_sigs(context)
+    call_sigs = genserver_call_sigs(context)
+    pid(cast_sigs, call_sigs)
+  end
+
+  defp genserver_pid_type_dynamic(module, stack) do
     cast_sigs = genserver_cast_sigs(module, stack)
     call_sigs = genserver_call_sigs(module, stack)
-    # success_type = tuple([atom([:ok]), pid(cast_sigs, call_sigs)])
-    # error_type = union(tuple([atom([:error]), term()]), atom([:ignore]))
     pid(cast_sigs, call_sigs)
+  end
+
+  defp genserver_cast_sigs(context) do
+    case genserver_callback_clauses(context, :handle_cast, 2) do
+      [] ->
+        fun()
+
+      clauses ->
+        Enum.reduce(clauses, fun(), fn {[request_type | _], _return_type}, acc ->
+          intersection(acc, fun([request_type], atom([:ok])))
+        end)
+    end
   end
 
   defp genserver_cast_sigs(module, stack) do
@@ -2450,6 +2478,26 @@ defmodule Module.Types.Apply do
       clauses ->
         Enum.reduce(clauses, fun(), fn {[request_type | _], _return_type}, acc ->
           intersection(acc, fun([request_type], atom([:ok])))
+        end)
+    end
+  end
+
+  defp genserver_call_sigs(context) do
+    reply_shape = open_tuple([atom([:reply])])
+
+    case genserver_callback_clauses(context, :handle_call, 3) do
+      [] ->
+        fun()
+
+      clauses ->
+        Enum.reduce(clauses, fun(), fn {[request_type | _], return_type}, acc ->
+          response =
+            case tuple_fetch(intersection(return_type, reply_shape), 1) do
+              {_, type} -> type
+              _ -> none()
+            end
+
+          intersection(acc, fun([request_type], response))
         end)
     end
   end
@@ -2474,14 +2522,15 @@ defmodule Module.Types.Apply do
     end
   end
 
-  defp genserver_request_type(msg, module, callback, arity, stack, context) do
-    case genserver_callback_clauses(module, callback, arity, stack) do
+  defp genserver_request_type(msg, callback, arity, context) do
+    # 1
+    case genserver_callback_clauses(context, callback, arity) do
       [] ->
         term()
 
       clauses ->
         shape = literal_to_descr(msg, context)
-
+        # 2
         request_types =
           case Enum.filter(clauses, fn {[request_type | _], _} ->
                  not empty?(intersection(shape, request_type))
@@ -2489,7 +2538,7 @@ defmodule Module.Types.Apply do
             [] -> Enum.map(clauses, fn {[request_type | _], _} -> request_type end)
             matching -> Enum.map(matching, fn {[request_type | _], _} -> request_type end)
           end
-
+        # 3
         Enum.reduce(request_types, none(), &union/2)
     end
   end

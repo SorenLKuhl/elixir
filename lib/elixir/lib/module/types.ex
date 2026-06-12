@@ -33,6 +33,8 @@ defmodule Module.Types do
   # These functions are not inferred because they are added/managed by the compiler
   @no_infer [behaviour_info: 1]
 
+  @genserver_callbacks [handle_call: 3, handle_cast: 2]
+
   @doc false
   def infer(module, file, attrs, defs, used_private, env, {_, cache}) do
     # We don't care about inferring signatures for protocols,
@@ -72,10 +74,8 @@ defmodule Module.Types do
 
     stack = stack(:infer, file, module, {:__info__, 1}, env, cache, handler)
 
-    # In case there are loops, the other we traverse matters,
-    # so we sort the definitions for determinism
     {types, private, %{local_sigs: reachable_sigs} = context} =
-      for {fun_arity, kind, meta, _clauses} = def <- Enum.sort(defs),
+      for {fun_arity, kind, meta, _clauses} = def <- Enum.sort_by(defs, &def_sort_key/1),
           reduce: {[], [], context()} do
         {types, private, context} when kind in [:def, :defmacro] ->
           # Optimized version of finder, since we already have the definition
@@ -123,6 +123,10 @@ defmodule Module.Types do
       end)
 
     {Map.new(types), unreachable}
+  end
+
+  defp def_sort_key({fun_arity, _kind, _meta, _clauses}) do
+    {fun_arity not in @genserver_callbacks, fun_arity}
   end
 
   defp infer_mode(kind, infer_signatures?) do
