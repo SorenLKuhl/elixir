@@ -2418,27 +2418,27 @@ defmodule Module.Types.Apply do
     end
   end
 
-  def genserver_callback_clauses(module, fun, arity, stack) do
-    case ParallelChecker.fetch_export(stack.cache, module, fun, arity, false) do
-      {:ok, _, _, {_, _domain, clauses}} -> clauses
-      _ -> []
-    end
-  end
-
-  def genserver_callback_clauses(context, fun, arity) do
+  defp genserver_callback_clauses({:context, context}, fun, arity) do
     case context.local_sigs do
       %{{^fun, ^arity} => {_kind, {:infer, _domain, clauses}, _mapping}} -> clauses
       _ -> []
     end
   end
 
+  defp genserver_callback_clauses({:module, module, stack}, fun, arity) do
+    case ParallelChecker.fetch_export(stack.cache, module, fun, arity, false) do
+      {:ok, _, _, {_, _domain, clauses}} -> clauses
+      _ -> []
+    end
+  end
+
   def self_pid_type(stack, %{gen_server_pid_type: nil} = context) when stack.mode == :infer do
-    pid_type = genserver_pid_type(context)
+    pid_type = genserver_pid_type({:context, context})
     {pid_type, %{context | gen_server_pid_type: pid_type}}
   end
 
   def self_pid_type(stack, %{gen_server_pid_type: nil} = context) when stack.mode == :dynamic do
-    pid_type = genserver_pid_type_dynamic(stack.module, stack)
+    pid_type = genserver_pid_type({:module, stack.module, stack})
     {pid_type, %{context | gen_server_pid_type: pid_type}}
   end
 
@@ -2446,20 +2446,14 @@ defmodule Module.Types.Apply do
     {pid_type, context}
   end
 
-  defp genserver_pid_type(context) do
-    cast_sigs = genserver_cast_sigs(context)
-    call_sigs = genserver_call_sigs(context)
+  defp genserver_pid_type(source) do
+    cast_sigs = genserver_cast_sigs(source)
+    call_sigs = genserver_call_sigs(source)
     pid(cast_sigs, call_sigs)
   end
 
-  defp genserver_pid_type_dynamic(module, stack) do
-    cast_sigs = genserver_cast_sigs(module, stack)
-    call_sigs = genserver_call_sigs(module, stack)
-    pid(cast_sigs, call_sigs)
-  end
-
-  defp genserver_cast_sigs(context) do
-    case genserver_callback_clauses(context, :handle_cast, 2) do
+  defp genserver_cast_sigs(source) do
+    case genserver_callback_clauses(source, :handle_cast, 2) do
       [] ->
         fun()
 
@@ -2470,42 +2464,10 @@ defmodule Module.Types.Apply do
     end
   end
 
-  defp genserver_cast_sigs(module, stack) do
-    case genserver_callback_clauses(module, :handle_cast, 2, stack) do
-      [] ->
-        fun()
-
-      clauses ->
-        Enum.reduce(clauses, fun(), fn {[request_type | _], _return_type}, acc ->
-          intersection(acc, fun([request_type], atom([:ok])))
-        end)
-    end
-  end
-
-  defp genserver_call_sigs(context) do
+  defp genserver_call_sigs(source) do
     reply_shape = open_tuple([atom([:reply])])
 
-    case genserver_callback_clauses(context, :handle_call, 3) do
-      [] ->
-        fun()
-
-      clauses ->
-        Enum.reduce(clauses, fun(), fn {[request_type | _], return_type}, acc ->
-          response =
-            case tuple_fetch(intersection(return_type, reply_shape), 1) do
-              {_, type} -> type
-              _ -> none()
-            end
-
-          intersection(acc, fun([request_type], response))
-        end)
-    end
-  end
-
-  defp genserver_call_sigs(module, stack) do
-    reply_shape = open_tuple([atom([:reply])])
-
-    case genserver_callback_clauses(module, :handle_call, 3, stack) do
+    case genserver_callback_clauses(source, :handle_call, 3) do
       [] ->
         fun()
 
@@ -2524,7 +2486,7 @@ defmodule Module.Types.Apply do
 
   defp genserver_request_type(msg, callback, arity, context) do
     # 1
-    case genserver_callback_clauses(context, callback, arity) do
+    case genserver_callback_clauses({:context, context}, callback, arity) do
       [] ->
         term()
 
@@ -2538,6 +2500,7 @@ defmodule Module.Types.Apply do
             [] -> Enum.map(clauses, fn {[request_type | _], _} -> request_type end)
             matching -> Enum.map(matching, fn {[request_type | _], _} -> request_type end)
           end
+
         # 3
         Enum.reduce(request_types, none(), &union/2)
     end
