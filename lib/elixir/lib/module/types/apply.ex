@@ -550,7 +550,7 @@ defmodule Module.Types.Apply do
     {pid_expected, msg_expected, context} =
       if is_strict?(Kernel.elem(stack.function, 0)) do
         {pid_type, context} = self_pid_type(stack, context)
-        msg_expected = genserver_request_type(msg, :handle_call, 3, context)
+        msg_expected = genserver_request_type(msg, :handle_call, 3, context, stack)
         {pid_type, msg_expected, context}
       else
         {term(), term(), context}
@@ -569,7 +569,7 @@ defmodule Module.Types.Apply do
     {pid_expected, msg_expected, context} =
       if is_strict?(Kernel.elem(stack.function, 0)) do
         {pid_type, context} = self_pid_type(stack, context)
-        msg_expected = genserver_request_type(msg, :handle_call, 3, context)
+        msg_expected = genserver_request_type(msg, :handle_call, 3, context, stack)
         {pid_type, msg_expected, context}
       else
         {term(), term(), context}
@@ -589,7 +589,7 @@ defmodule Module.Types.Apply do
     {pid_expected, msg_expected, context} =
       if is_strict?(Kernel.elem(stack.function, 0)) do
         {pid_type, context} = self_pid_type(stack, context)
-        msg_expected = genserver_request_type(msg, :handle_cast, 2, context)
+        msg_expected = genserver_request_type(msg, :handle_cast, 2, context, stack)
         {pid_type, msg_expected, context}
       else
         {term(), term(), context}
@@ -2484,9 +2484,14 @@ defmodule Module.Types.Apply do
     end
   end
 
-  defp genserver_request_type(msg, callback, arity, context) do
+  defp genserver_request_type(msg, callback, arity, context, stack) do
     # 1
-    case genserver_callback_clauses({:context, context}, callback, arity) do
+    clauses = if stack.mode == :infer do
+      genserver_callback_clauses({:context, context}, callback, arity)
+    else
+      genserver_callback_clauses({:module, stack.module, stack}, callback, arity)
+    end
+    case clauses do
       [] ->
         term()
 
