@@ -550,7 +550,7 @@ defmodule Module.Types.Expr do
   end
 
   def of_expr(
-        {{:., _, [GenServer, :start_link]}, _meta, [mod | _] = args} = call,
+        {{:., _, [GenServer, :start_link]}, _meta, [_mod | _] = args} = call,
         _expected,
         _expr,
         stack,
@@ -577,30 +577,6 @@ defmodule Module.Types.Expr do
       apply_many(mods, key_or_fun, [], expected, call, stack, context)
     end
   end
-
-  # Add receive accumulator to context and let the receive clauses update it as they are processed.
-  # This way we can reuse all the machinery we already have for processing receive clauses,
-  # and we don't need to worry about sanitizing pinned vars or declaring body variables.
-  # NOTE: this does not narrow the type based on the clause bodies.
-  # def of_expr(
-  #       {{:., _, [:erlang, :spawn]}, _meta, [fun_arg]} = call,
-  #       _expected,
-  #       _expr,
-  #       stack,
-  #       context
-  #     ) do
-  #   # Add accumulator to context
-  #   context = Map.put(context, :receive_acc, none())
-
-  #   # Process the fun_arg passed to spawn/1 to fill the receive_acc
-  #   {_fun_type, context} = of_expr(fun_arg, dynamic(fun(0)), call, stack, context)
-
-  #   # Retrieve the accepted message types
-  #   msg_type = context.receive_acc
-
-  #   # Remove the receive accumulator as to not mess up other receive clauses
-  #   {pid(msg_type), Map.delete(context, :receive_acc)}
-  # end
 
   def of_expr({{:., _, [remote, name]}, meta, args} = call, expected, _expr, stack, context) do
     {remote_type, context} = of_expr(remote, atom(), call, stack, context)
@@ -1134,18 +1110,4 @@ defmodule Module.Types.Expr do
         ])
     }
   end
-
-  #   ### Helper to get GenServer handle_call clauses in the given module.
-  # defp handle_call_clauses(module, stack),
-  #   do: genserver_callback_clauses(module, :handle_call, 3, stack)
-
-  # defp handle_cast_clauses(module, stack),
-  #   do: genserver_callback_clauses(module, :handle_cast, 2, stack)
-
-  # defp genserver_callback_clauses(module, fun, arity, stack) do
-  #   case ParallelChecker.fetch_export(stack.cache, module, fun, arity, false) do
-  #     {:ok, _, _, {_, _domain, clauses}} -> clauses
-  #     _ -> []
-  #   end
-  # end
 end

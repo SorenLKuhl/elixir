@@ -2640,11 +2640,10 @@ defmodule Module.Types.Descr do
     {msg, ret}
   end
 
-  # defp pid_empty?({msg_type, _ret_type}), do: empty?(msg_type)
   defp pid_empty?(0), do: true
   defp pid_empty?({_msg_type, _ret_type}), do: false
 
-  # renders as  pid()  — both the sentinel :term and the top @none map render as untyped pid()
+  # renders as  pid()  - both the sentinel :term and the top @none map render as untyped pid()
   defp pid_to_quoted({msg_type, :term}, _opts) when msg_type == @none or msg_type == :term,
     do: [{:pid, [], []}]
 
@@ -2682,9 +2681,7 @@ defmodule Module.Types.Descr do
   end
 
   def pid_cast_sigs(_), do: :none
-  # TODO: If not used, could be removed
-  # Returns :none if no pid component or no return type tracked,
-  # :term if the global term type, or the return descr if typed pid(T, R).
+
   def pid_call_sigs(%{pid: {_msg_type, call_sigs}}), do: call_sigs
   # term() contains pid()
   def pid_call_sigs(:term), do: :term

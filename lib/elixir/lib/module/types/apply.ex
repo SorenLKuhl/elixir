@@ -101,7 +101,7 @@ defmodule Module.Types.Apply do
     |> union(atom())
     |> union(tuple([atom(), atom()]))
 
-  @send_destination send_destination
+  # @send_destination send_destination
 
   basic_arith_2_args_clauses = [
     {[integer(), integer()], integer()},
@@ -559,7 +559,7 @@ defmodule Module.Types.Apply do
     {msg_type, context} = of_fun.(msg, msg_expected, expr, stack, context)
     {pid_type, context} = of_fun.(pid, pid_expected, expr, stack, context)
 
-    case remote_apply_genserver_call(pid_type, msg_type, stack) do
+    case remote_apply_genserver_call(pid_type, msg_type) do
       {:ok, type} -> {return(type, [pid_type, msg_type], stack), context}
       {:error, error} -> remote_error(error, GenServer, :call, 2, expr, stack, context)
     end
@@ -579,7 +579,7 @@ defmodule Module.Types.Apply do
     {pid_type, context} = of_fun.(pid, pid_expected, expr, stack, context)
     {timeout_type, context} = of_fun.(timeout, integer(), expr, stack, context)
 
-    case remote_apply_genserver_call(pid_type, msg_type, stack) do
+    case remote_apply_genserver_call(pid_type, msg_type) do
       {:ok, type} -> {return(type, [pid_type, msg_type, timeout_type], stack), context}
       {:error, error} -> remote_error(error, GenServer, :call, 3, expr, stack, context)
     end
@@ -893,68 +893,6 @@ defmodule Module.Types.Apply do
     {{:strong, nil, [{domain, term()}]}, domain, context}
   end
 
-  # def remote_domain(GenServer, :call, [pid, msg], _expected, _meta, stack, context) do
-  #   pid_type = literal_to_descr(pid, context)
-  #   msg_type = literal_to_descr(msg, context)
-
-  #   dst =
-  #     if is_strict?(Kernel.elem(stack.function, 0)) do
-  #       pid(fun(), fun([msg_type], term()))
-  #     else
-  #       pid_type
-  #     end
-
-  #   domain = [dst, term()]
-
-  #   {{:strong, nil, [{domain, dynamic()}]}, domain, context}
-  # end
-
-  # def remote_domain(GenServer, :call, [pid, msg, _timeout], _expected, _meta, stack, context) do
-  #   pid_type = literal_to_descr(pid, context)
-  #   msg_type = literal_to_descr(msg, context)
-
-  #   dst =
-  #     if is_strict?(Kernel.elem(stack.function, 0)) do
-  #       pid(fun(), fun([msg_type], term()))
-  #     else
-  #       pid_type
-  #     end
-
-  #   domain = [dst, term(), integer()]
-
-  #   {{:strong, nil, [{domain, dynamic()}]}, domain, context}
-  # end
-
-  # def remote_domain(GenServer, :cast, [pid, msg], _expected, _meta, stack, context) do
-  #   pid_type = literal_to_descr(pid, context)
-  #   msg_type = literal_to_descr(msg, context)
-
-  #   dst =
-  #     if is_strict?(Kernel.elem(stack.function, 0)) do
-  #       pid(fun([msg_type], term()), fun())
-  #     else
-  #       pid_type
-  #     end
-
-  #   domain = [dst, term()]
-
-  #   {{:strong, nil, [{domain, dynamic()}]}, domain, context}
-  # end
-
-  # def remote_domain(:erlang, :send, [_dest, msg], _expected, _meta, stack, context) do
-  #   msg_type = literal_to_descr(msg, context)
-
-  #   dst =
-  #     if is_strict?(Kernel.elem(stack.function, 0)) do
-  #       difference(@send_destination, pid()) |> union(pid(msg_type))
-  #     else
-  #       @send_destination
-  #     end
-
-  #   domain = [dst, term()]
-  #   {{:strong, nil, [{domain, dynamic()}]}, domain, context}
-  # end
-
   def remote_domain(:maps, :get, [key, _], expected, _meta, _stack, context) when is_atom(key) do
     domain = [term(), open_map([{key, expected}])]
     {{:strong, nil, [{domain, term()}]}, domain, context}
@@ -1028,23 +966,6 @@ defmodule Module.Types.Apply do
       :badnonemptylist -> {:error, badremote(:erlang, :tl, [list])}
     end
   end
-
-  # defp remote_apply(:erlang, :send, _info, [dest, msg] = args_types, stack) do
-  #   # Extract the pid component from the destination type (may be a union with atom/port/ref)
-  #   case pid_message_type(dest) do
-  #     :none ->
-  #       # pid()
-  #       {:ok, return(dynamic(), args_types, stack)}
-
-  #     msg_type ->
-  #       # Typed pid — verify the message is a subtype
-  #       if subtype?(msg, msg_type) do
-  #         {:ok, return(dynamic(), args_types, stack)}
-  #       else
-  #         {:error, {:bad_typed_pid_send, dest, msg, msg_type}}
-  #       end
-  #   end
-  # end
 
   @struct_key atom([:__struct__])
   @nil_atom atom([nil])
@@ -1316,37 +1237,6 @@ defmodule Module.Types.Apply do
       :badmap -> {:error, badremote(:maps, :keys, [map])}
     end
   end
-
-  # These remote_apply clauses are dead code — GenServer.call/cast are handled fully
-  # in do_remote, which returns a 2-tuple and bypasses remote_apply.
-  # defp remote_apply(GenServer, :call, _info, [pid_type, request_type], stack) do
-  #   remote_apply_genserver_call(pid_type, request_type, stack)
-  # end
-
-  # defp remote_apply(GenServer, :call, _info, [pid_type, request_type, _timeout], stack) do
-  #   remote_apply_genserver_call(pid_type, request_type, stack)
-  # end
-
-  # defp remote_apply(GenServer, :cast, _info, [pid_type, request_type], stack) do
-  #   pid_msg_type = pid_cast_sigs(pid_type)
-
-  #   case pid_msg_type do
-  #     :none ->
-  #       {:ok, dynamic()}
-
-  #     _ ->
-  #       pid_cast_sigs = pid_cast_sigs(pid_type)
-
-  #       if pid_cast_sigs == :term or pid_cast_sigs == fun() do
-  #         {:ok, dynamic()}
-  #       else
-  #         case fun_apply(pid_cast_sigs, [request_type]) do
-  #           {:ok, value} -> {:ok, value}
-  #           reason -> {:error, {:badapply, pid_cast_sigs, [request_type], reason}}
-  #         end
-  #       end
-  #   end
-  # end
 
   defp remote_apply(_mod, _fun, info, args_types, stack) do
     remote_apply(info, args_types, stack)
@@ -2399,13 +2289,8 @@ defmodule Module.Types.Apply do
     end
   end
 
-  # THESIS CHANGE: new GenServer helper section — remote_apply_genserver_call,
-  # handle_call_clauses, handle_cast_clauses, genserver_callback_clauses,
-  # and literal_to_descr family for converting quoted AST literals to type descriptors
-  ### GenServer Helpers
-
   # Helper for GenServer.call type inference
-  defp remote_apply_genserver_call(pid_type, request_type, stack) do
+  defp remote_apply_genserver_call(pid_type, request_type) do
     pid_call_sigs = pid_call_sigs(pid_type)
 
     if pid_call_sigs == :none or pid_call_sigs == :term or pid_call_sigs == fun() do
@@ -2486,11 +2371,13 @@ defmodule Module.Types.Apply do
 
   defp genserver_request_type(msg, callback, arity, context, stack) do
     # 1
-    clauses = if stack.mode == :infer do
-      genserver_callback_clauses({:context, context}, callback, arity)
-    else
-      genserver_callback_clauses({:module, stack.module, stack}, callback, arity)
-    end
+    clauses =
+      if stack.mode == :infer do
+        genserver_callback_clauses({:context, context}, callback, arity)
+      else
+        genserver_callback_clauses({:module, stack.module, stack}, callback, arity)
+      end
+
     case clauses do
       [] ->
         term()
