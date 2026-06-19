@@ -804,7 +804,7 @@ defmodule Module.Types.PatternTest do
 
              where "x" was given the type:
 
-                 # type: pid()
+                 # type: pid(fun(), fun())
                  # from: types_test.ex:LINE
                  is_pid(x)
              """
@@ -873,7 +873,7 @@ defmodule Module.Types.PatternTest do
 
              where "x" was given the type:
 
-                 # type: pid()
+                 # type: pid(fun(), fun())
                  # from: types_test.ex:LINE
                  is_pid(x)
              """
