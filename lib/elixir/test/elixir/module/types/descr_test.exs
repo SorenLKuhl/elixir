@@ -957,7 +957,7 @@ defmodule Module.Types.DescrTest do
 
     test "pid" do
       top_pid = pid()
-      
+
       # Call types
       int_to_int = fun([integer()], integer())
       int_to_float = fun([integer()], float())
@@ -978,10 +978,6 @@ defmodule Module.Types.DescrTest do
 
       tcall = intersection(int_to_int, binary_to_binary)
       assert subtype?(tcall, int_to_int)
-
-      
-      
-
     end
   end
 

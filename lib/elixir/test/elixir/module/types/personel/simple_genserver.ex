@@ -37,7 +37,7 @@ defmodule SimpleGenServer do
   end
 
   @impl true
-  def handle_call({:add_string, x}, _from, state)  do
+  def handle_call({:add_string, x}, _from, state) do
     {:reply, x <> "Test", state}
   end
 
