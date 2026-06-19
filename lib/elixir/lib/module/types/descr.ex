@@ -112,7 +112,6 @@ defmodule Module.Types.Descr do
   def open_map(pairs), do: map_descr(:open, pairs)
   def open_tuple(elements, _fallback \\ term()), do: tuple_descr(:open, elements)
   def pid(), do: %{pid: @pid_top}
-  def pid(cast_sigs), do: %{pid: {cast_sigs, fun()}}
   def pid(cast_sigs, call_sigs), do: %{pid: {cast_sigs, call_sigs}}
   def port(), do: %{bitmap: @bit_port}
   def reference(), do: %{bitmap: @bit_reference}
