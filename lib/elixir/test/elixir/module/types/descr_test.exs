@@ -957,22 +957,31 @@ defmodule Module.Types.DescrTest do
 
     test "pid" do
       top_pid = pid()
-      term_pid = pid(term())
-      int_pid = pid(integer())
-      num_pid = pid(number())
+      
+      # Call types
+      int_to_int = fun([integer()], integer())
+      int_to_float = fun([integer()], float())
+      binary_to_binary = fun([binary()], binary())
+      binary_to_int = fun([binary()], integer())
 
-      assert subtype?(num_pid, int_pid)
-      assert subtype?(num_pid, top_pid)
-      assert subtype?(term_pid, top_pid)
-      refute subtype?(int_pid, num_pid)
-      refute subtype?(int_pid, term_pid)
-      refute subtype?(top_pid, term_pid)
+      # Cast types
+      ok = atom([:ok])
+      int_to_ok = fun([integer()], ok)
+      num_to_ok = fun([number()], ok)
 
-      num_to_num = pid(integer(), number())
-      num_to_int = pid(number(), integer())
+      # Tests
+      p1 = pid(int_to_ok, binary_to_int)
+      p2 = pid(num_to_ok, binary_to_int)
 
-      assert subtype?(num_to_int, num_to_num)
-      refute subtype?(num_to_num, num_to_int)
+      assert subtype?(p2, p1)
+      refute subtype?(p1, p2)
+
+      tcall = intersection(int_to_int, binary_to_binary)
+      assert subtype?(tcall, int_to_int)
+
+      
+      
+
     end
   end
 
@@ -2804,7 +2813,7 @@ defmodule Module.Types.DescrTest do
 
     test "bitmap" do
       assert union(pid(), bitstring()) |> to_quoted_string() ==
-               "bitstring() or pid()"
+               "bitstring() or pid(fun(), fun())"
 
       assert union(integer(), union(float(), binary())) |> to_quoted_string() ==
                "binary() or float() or integer()"
@@ -2815,7 +2824,7 @@ defmodule Module.Types.DescrTest do
 
     test "bitmap (negation)" do
       assert union(pid(), bitstring()) |> negation() |> to_quoted_string() ==
-               "not bitstring() and not pid()"
+               "not bitstring() and not pid(fun(), fun())"
 
       assert difference(bitstring(), binary())
              |> union(integer())
@@ -2868,7 +2877,7 @@ defmodule Module.Types.DescrTest do
                "bitstring() and not binary()"
 
       assert intersection(union(binary(), pid()), dynamic()) |> to_quoted_string() ==
-               "dynamic(binary() or pid())"
+               "dynamic(binary() or pid(fun(), fun()))"
 
       assert union(atom([:foo, :bar]), dynamic()) |> to_quoted_string() ==
                "dynamic() or :bar or :foo"
@@ -2923,7 +2932,7 @@ defmodule Module.Types.DescrTest do
 
       # Merge subtypes
       assert union(list(float(), pid()), list(number(), pid())) |> to_quoted_string() ==
-               "empty_list() or non_empty_list(float() or integer(), pid())"
+               "empty_list() or non_empty_list(float() or integer(), pid(fun(), fun()))"
 
       # Merge last element types
       assert union(list(atom([:ok]), integer()), list(atom([:ok]), float()))
@@ -2932,7 +2941,7 @@ defmodule Module.Types.DescrTest do
 
       assert union(dynamic(list(integer(), float())), dynamic(list(integer(), pid())))
              |> to_quoted_string() ==
-               "dynamic(empty_list() or non_empty_list(integer(), float() or pid()))"
+               "dynamic(empty_list() or non_empty_list(integer(), float() or pid(fun(), fun())))"
 
       list_with_tail =
         non_empty_list(atom(), union(integer(), empty_list()))
@@ -2981,7 +2990,7 @@ defmodule Module.Types.DescrTest do
              |> union(tuple([pid(), pid(), port()]))
              |> union(tuple([pid(), pid(), atom()]))
              |> to_quoted_string() ==
-               "{float() or integer(), atom()} or {pid(), pid(), atom() or port()}"
+               "{float() or integer(), atom()} or {pid(fun(), fun()), pid(fun(), fun()), atom() or port()}"
 
       assert union(open_tuple([integer()]), open_tuple([float()])) |> to_quoted_string() ==
                "{float() or integer(), ...}"
@@ -3097,7 +3106,7 @@ defmodule Module.Types.DescrTest do
              |> union(fun([float()], float()))
              |> union(fun([pid()], pid()))
              |> to_quoted_string() ==
-               "(integer() -> integer()) or (float() -> float()) or (pid() -> pid())"
+               "(integer() -> integer()) or (float() -> float()) or (pid(fun(), fun()) -> pid(fun(), fun()))"
 
       assert fun(3) |> to_quoted_string() == "(none(), none(), none() -> term())"
 
@@ -3136,18 +3145,18 @@ defmodule Module.Types.DescrTest do
       codomain_part = fun([pid(), float()], dynamic(atom()) |> union(integer()))
 
       assert codomain_part |> to_quoted_string() ==
-               "(pid(), float() -> dynamic(atom()) or integer())"
+               "(pid(fun(), fun()), float() -> dynamic(atom()) or integer())"
 
       assert union(domain_part, codomain_part) |> to_quoted_string() ==
                """
                (dynamic(atom()) or integer(), binary() -> float()) or
-                 (pid(), float() -> dynamic(atom()) or integer())\
+                 (pid(fun(), fun()), float() -> dynamic(atom()) or integer())\
                """
 
       assert intersection(domain_part, codomain_part) |> to_quoted_string() ==
                """
                (dynamic(atom()) or integer(), binary() -> float()) and
-                 (pid(), float() -> dynamic(atom()) or integer())\
+                 (pid(fun(), fun()), float() -> dynamic(atom()) or integer())\
                """
     end
 
@@ -3209,7 +3218,7 @@ defmodule Module.Types.DescrTest do
              |> union(closed_map(x: pid(), y: pid(), z: port()))
              |> union(closed_map(x: pid(), y: pid(), z: atom()))
              |> to_quoted_string() ==
-               "%{a: float() or integer(), b: atom()} or %{x: pid(), y: pid(), z: atom() or port()}"
+               "%{a: float() or integer(), b: atom()} or\n  %{x: pid(fun(), fun()), y: pid(fun(), fun()), z: atom() or port()}"
 
       # Open map fusion
       assert union(open_map(a: integer()), open_map(a: float())) |> to_quoted_string() ==
@@ -3258,7 +3267,7 @@ defmodule Module.Types.DescrTest do
 
       assert closed_map(a: number(), b: atom(), c: pid())
              |> difference(closed_map(a: integer(), b: atom(), c: pid()))
-             |> to_quoted_string() == "%{a: float(), b: atom(), c: pid()}"
+             |> to_quoted_string() == "%{a: float(), b: atom(), c: pid(fun(), fun())}"
 
       # No simplification compared to above, as it is an open map
       assert open_map(a: number(), b: atom())
