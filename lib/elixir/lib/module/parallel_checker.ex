@@ -316,7 +316,7 @@ defmodule Module.ParallelChecker do
       |> extract_no_warn_undefined()
       |> merge_compiler_no_warn_undefined()
 
-    attributes = Keyword.take(attributes, [:__protocol__, :__impl__])
+    attributes = Keyword.take(attributes, [:__protocol__, :__impl__, :behaviour])
 
     {module, file, line, definitions, no_warn_undefined, behaviours, impls, attributes,
      after_verify}

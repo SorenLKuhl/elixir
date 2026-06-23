@@ -44,6 +44,7 @@ defmodule Module.Types do
       :elixir_config.get(:infer_signatures) != false and cache != nil and not protocol?(attrs)
 
     impl = impl_for(attrs)
+    is_genserver = genserver?(attrs)
 
     finder =
       fn fun_arity ->
@@ -74,9 +75,11 @@ defmodule Module.Types do
 
     stack = stack(:infer, file, module, {:__info__, 1}, env, cache, handler)
 
+    sorted_defs = if is_genserver, do: Enum.sort_by(defs, &def_sort_key/1), else: Enum.sort(defs)
+
     {types, private, %{local_sigs: reachable_sigs} = context} =
-      for {fun_arity, kind, meta, _clauses} = def <- Enum.sort_by(defs, &def_sort_key/1),
-          reduce: {[], [], context()} do
+      for {fun_arity, kind, meta, _clauses} = def <- sorted_defs,
+          reduce: {[], [], %{context() | is_genserver: is_genserver}} do
         {types, private, context} when kind in [:def, :defmacro] ->
           # Optimized version of finder, since we already have the definition
           finder = fn _ ->
@@ -135,6 +138,10 @@ defmodule Module.Types do
 
   defp protocol?(attrs) do
     List.keymember?(attrs, :__protocol__, 0)
+  end
+
+  defp genserver?(attrs) do
+    Enum.any?(attrs, &match?({:behaviour, GenServer}, &1))
   end
 
   defp impl_for(attrs) do
@@ -223,6 +230,7 @@ defmodule Module.Types do
   @doc false
   def warnings(module, file, attrs, defs, no_warn_undefined, cache) do
     impl = impl_for(attrs)
+    is_genserver = genserver?(attrs)
 
     finder = fn fun_arity ->
       case :lists.keyfind(fun_arity, 1, defs) do
@@ -235,7 +243,7 @@ defmodule Module.Types do
     stack = stack(:dynamic, file, module, {:__info__, 1}, no_warn_undefined, cache, handler)
 
     context =
-      Enum.reduce(defs, context(), fn {fun_arity, _kind, meta, _clauses} = def, context ->
+      Enum.reduce(defs, %{context() | is_genserver: is_genserver}, fn {fun_arity, _kind, meta, _clauses} = def, context ->
         # Optimized version of finder, since we already the definition
         finder = fn _ -> default_domain(:dynamic, def, fun_arity, impl) end
         {_kind, _inferred, context} = local_handler(meta, fun_arity, stack, context, finder)
@@ -531,7 +539,8 @@ defmodule Module.Types do
       local_used: %{},
       # Cached reverse arrows
       reverse_arrows: %{},
-      gen_server_pid_type: nil
+      gen_server_pid_type: nil,
+      is_genserver: false
     }
   end
 

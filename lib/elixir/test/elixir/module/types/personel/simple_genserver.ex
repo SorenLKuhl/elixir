@@ -10,7 +10,7 @@ defmodule SimpleGenServer do
     strict_nested_add_one(pid, x)
   end
 
-  def strict_nested_add_one(pid, x) when is_integer(x) do
+  def strict_nested_add_one(pid, x) do
     GenServer.call(pid, {:add_one, x})
   end
 
@@ -53,7 +53,7 @@ defmodule SimpleGenServer do
     # x = strict_add_float(pid, 42.0)
     # x <> " world"
     # GenServer.cast(pid, {:add_float, "42.0"})
-    x = strict_add_string(pid, 42)
+    x = strict_add_one(pid, "42")
     x <> "Hello world"
   end
 end

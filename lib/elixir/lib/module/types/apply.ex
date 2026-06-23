@@ -548,10 +548,9 @@ defmodule Module.Types.Apply do
 
   defp do_remote(GenServer, :call, [pid, msg], _expected, expr, stack, context, of_fun) do
     {pid_expected, msg_expected, context} =
-      if is_strict?(Kernel.elem(stack.function, 0)) do
+      if context.is_genserver do
         {pid_type, context} = self_pid_type(stack, context)
-        msg_expected = genserver_request_type(msg, :handle_call, 3, context, stack)
-        {pid_type, msg_expected, context}
+        {pid_type, genserver_request_type(msg, :handle_call, 3, context, stack), context}
       else
         {term(), term(), context}
       end
@@ -567,10 +566,9 @@ defmodule Module.Types.Apply do
 
   defp do_remote(GenServer, :call, [pid, msg, timeout], _expected, expr, stack, context, of_fun) do
     {pid_expected, msg_expected, context} =
-      if is_strict?(Kernel.elem(stack.function, 0)) do
+      if context.is_genserver do
         {pid_type, context} = self_pid_type(stack, context)
-        msg_expected = genserver_request_type(msg, :handle_call, 3, context, stack)
-        {pid_type, msg_expected, context}
+        {pid_type, genserver_request_type(msg, :handle_call, 3, context, stack), context}
       else
         {term(), term(), context}
       end
@@ -587,10 +585,9 @@ defmodule Module.Types.Apply do
 
   defp do_remote(GenServer, :cast, [pid, msg], _expected, expr, stack, context, of_fun) do
     {pid_expected, msg_expected, context} =
-      if is_strict?(Kernel.elem(stack.function, 0)) do
+      if context.is_genserver do
         {pid_type, context} = self_pid_type(stack, context)
-        msg_expected = genserver_request_type(msg, :handle_cast, 2, context, stack)
-        {pid_type, msg_expected, context}
+        {pid_type, genserver_request_type(msg, :handle_cast, 2, context, stack), context}
       else
         {term(), term(), context}
       end
@@ -598,18 +595,13 @@ defmodule Module.Types.Apply do
     {msg_type, context} = of_fun.(msg, msg_expected, expr, stack, context)
     {pid_type, context} = of_fun.(pid, pid_expected, expr, stack, context)
 
-    pid_cast_sigs =
-      if is_strict?(Kernel.elem(stack.function, 0)) do
-        lower_bound(pid_cast_sigs(pid_type))
-      else
-        pid_cast_sigs(pid_type)
-      end
+    pid_cast_sigs = pid_cast_sigs(pid_type)
 
     result =
       if pid_cast_sigs == :none or pid_cast_sigs == :term or pid_cast_sigs == fun() do
         dynamic()
       else
-        case fun_apply(pid_cast_sigs, [msg_type]) do
+        case fun_apply(lower_bound(pid_cast_sigs), [msg_type]) do
           {:ok, value} -> value
           _ -> dynamic()
         end
@@ -1430,13 +1422,12 @@ defmodule Module.Types.Apply do
     {args_types, context} =
       zip_map_reduce(args, domain, context, &of_fun.(&1, &2, expr, stack, &3))
 
-    # Apply Strict subtyping
-    if is_strict?(fun) and not zip_subtype?(args_types, domain) do
-      error = {:badlocal, Kernel.elem(local_info, 1), args_types, expr, context}
-      {error_type(), error(error, with_span(elem(expr, 1), fun), stack, context)}
-    else
-      local_apply(local_info, fun, args_types, expr, stack, context)
-    end
+    # if context.is_genserver and not zip_subtype?(args_types, domain) do
+    #   error = {:badlocal, Kernel.elem(local_info, 1), args_types, expr, context}
+    #   {error_type(), error(error, with_span(elem(expr, 1), fun), stack, context)}
+    # else
+    local_apply(local_info, fun, args_types, expr, stack, context)
+    # end
   end
 
   defp local_domain(fun, args, expected, meta, stack, context) do
@@ -2292,7 +2283,7 @@ defmodule Module.Types.Apply do
   # Helper for GenServer.call type inference
   defp remote_apply_genserver_call(pid_type, request_type) do
     pid_call_sigs = pid_call_sigs(pid_type)
-
+    IO.puts("pid_call_sigs: #{inspect(pid_call_sigs, pretty: true)}")
     if pid_call_sigs == :none or pid_call_sigs == :term or pid_call_sigs == fun() do
       {:ok, dynamic()}
     else
@@ -2315,6 +2306,10 @@ defmodule Module.Types.Apply do
       {:ok, _, _, {_, _domain, clauses}} -> clauses
       _ -> []
     end
+  end
+
+  def self_pid_type(_stack, %{gen_server_pid_type: nil, is_genserver: false} = context) do
+    {pid(), context}
   end
 
   def self_pid_type(stack, %{gen_server_pid_type: nil} = context) when stack.mode == :infer do
@@ -2351,6 +2346,7 @@ defmodule Module.Types.Apply do
 
   defp genserver_call_sigs(source) do
     reply_shape = open_tuple([atom([:reply])])
+    stop_reply_shape = open_tuple([atom([:stop]), term(), term(), term()])
 
     case genserver_callback_clauses(source, :handle_call, 3) do
       [] ->
@@ -2358,12 +2354,19 @@ defmodule Module.Types.Apply do
 
       clauses ->
         Enum.reduce(clauses, fun(), fn {[request_type | _], return_type}, acc ->
-          response =
+          reply_response =
             case tuple_fetch(intersection(return_type, reply_shape), 1) do
               {_, type} -> type
               _ -> none()
             end
 
+          stop_response =
+            case tuple_fetch(intersection(return_type, stop_reply_shape), 2) do
+              {_, type} -> type
+              _ -> none()
+            end
+
+          response = union(reply_response, stop_response)
           intersection(acc, fun([request_type], response))
         end)
     end
