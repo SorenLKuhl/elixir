@@ -348,8 +348,7 @@ defmodule Module.Types.Apply do
 
     # Apply Strict subtyping
     if is_strict?(fun) and not zip_subtype?(args_types, domain) do
-      # Produce warning here
-      remote_apply(info, nil, fun, args_types, expr, stack, context)
+      remote_error({:badremote, info, args_types}, nil, fun, length(args_types), expr, stack, context)
     else
       remote_apply(info, nil, fun, args_types, expr, stack, context)
     end
@@ -377,8 +376,7 @@ defmodule Module.Types.Apply do
 
         # Apply Strict subtyping
         if is_strict?(fun) and not zip_subtype?(args_types, domain) do
-          # Produce warning here
-          remote_apply(info, mod, fun, args_types, expr, stack, context)
+          remote_error({:badremote, info, args_types}, mod, fun, length(args_types), expr, stack, context)
         else
           remote_apply(info, mod, fun, args_types, expr, stack, context)
         end
