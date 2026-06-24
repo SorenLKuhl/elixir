@@ -99,7 +99,7 @@ defmodule Module.Types.Of do
     %{vars: %{^version => %{type: old_type, off_traces: off_traces} = data} = vars} = context
 
     # Dont refine the var if in a strict fun
-    if is_strict_fun(expr) and old_type != dynamic() do
+    if (is_strict_fun(expr) or is_remote_strict_fun(expr)) and old_type != dynamic() do
       {old_type, context}
     else
       context =

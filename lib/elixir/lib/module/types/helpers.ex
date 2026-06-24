@@ -577,6 +577,14 @@ defmodule Module.Types.Helpers do
     false
   end
 
+  def is_remote_strict_fun({{:., _, [_mod, fun]}, _, _args}) when is_atom(fun) do
+    is_strict?(fun)
+  end
+
+  def is_remote_strict_fun(_)do
+    false
+  end
+
   defmacro is_strict_fun(expr) do
     quote do
       is_tuple(unquote(expr)) and

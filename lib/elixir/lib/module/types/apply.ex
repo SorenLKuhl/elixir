@@ -346,7 +346,13 @@ defmodule Module.Types.Apply do
     {args_types, context} =
       zip_map_reduce(args, domain, context, &of_fun.(&1, &2, expr, stack, &3))
 
-    remote_apply(info, nil, fun, args_types, expr, stack, context)
+    # Apply Strict subtyping
+    if is_strict?(fun) and not zip_subtype?(args_types, domain) do
+      # Produce warning here
+      remote_apply(info, nil, fun, args_types, expr, stack, context)
+    else
+      remote_apply(info, nil, fun, args_types, expr, stack, context)
+    end
   end
 
   @doc """
@@ -369,7 +375,13 @@ defmodule Module.Types.Apply do
         {args_types, context} =
           zip_map_reduce(args, domain, context, &of_fun.(&1, &2, expr, stack, &3))
 
-        remote_apply(info, mod, fun, args_types, expr, stack, context)
+        # Apply Strict subtyping
+        if is_strict?(fun) and not zip_subtype?(args_types, domain) do
+          # Produce warning here
+          remote_apply(info, mod, fun, args_types, expr, stack, context)
+        else
+          remote_apply(info, mod, fun, args_types, expr, stack, context)
+        end
 
       {type, context} ->
         {type, context}
