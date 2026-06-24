@@ -581,7 +581,7 @@ defmodule Module.Types.Helpers do
     is_strict?(fun)
   end
 
-  def is_remote_strict_fun(_)do
+  def is_remote_strict_fun(_) do
     false
   end
 
