@@ -347,19 +347,19 @@ defmodule Module.Types.Apply do
       zip_map_reduce(args, domain, context, &of_fun.(&1, &2, expr, stack, &3))
 
     # Apply Strict subtyping
-    if is_strict?(fun) and not zip_subtype?(args_types, domain) do
-      remote_error(
-        {:badremote, info, args_types},
-        nil,
-        fun,
-        length(args_types),
-        expr,
-        stack,
-        context
-      )
-    else
+    # if is_strict?(fun) and not zip_subtype?(args_types, domain) do
+    #   remote_error(
+    #     {:badremote, info, args_types},
+    #     nil,
+    #     fun,
+    #     length(args_types),
+    #     expr,
+    #     stack,
+    #     context
+    #   )
+    # else
       remote_apply(info, nil, fun, args_types, expr, stack, context)
-    end
+    # end
   end
 
   @doc """
@@ -383,19 +383,19 @@ defmodule Module.Types.Apply do
           zip_map_reduce(args, domain, context, &of_fun.(&1, &2, expr, stack, &3))
 
         # Apply Strict subtyping
-        if is_strict?(fun) and not zip_subtype?(args_types, domain) do
-          remote_error(
-            {:badremote, info, args_types},
-            mod,
-            fun,
-            length(args_types),
-            expr,
-            stack,
-            context
-          )
-        else
+        # if is_strict?(fun) and not zip_subtype?(args_types, domain) do
+        #   remote_error(
+        #     {:badremote, info, args_types},
+        #     mod,
+        #     fun,
+        #     length(args_types),
+        #     expr,
+        #     stack,
+        #     context
+        #   )
+        # else
           remote_apply(info, mod, fun, args_types, expr, stack, context)
-        end
+        # end
 
       {type, context} ->
         {type, context}
@@ -573,14 +573,13 @@ defmodule Module.Types.Apply do
   end
 
   defp do_remote(GenServer, :call, [pid, msg], _expected, expr, stack, context, of_fun) do
-    {pid_expected, msg_expected, context} =
-      if is_strict?(Kernel.elem(stack.function, 0)) do
-        {pid_type, context} = self_pid_type(stack, context)
-        msg_expected = genserver_request_type(msg, :handle_call, 3, context, stack)
-        {pid_type, msg_expected, context}
-      else
-        {term(), term(), context}
-      end
+    # if is_strict?(Kernel.elem(stack.function, 0)) do
+    {pid_type, context} = self_pid_type(stack, context)
+    msg_expected = genserver_request_type(msg, :handle_call, 3, context, stack)
+    {pid_expected, msg_expected, context} = {pid_type, msg_expected, context}
+    # else
+    #   {term(), term(), context}
+    # end
 
     {msg_type, context} = of_fun.(msg, msg_expected, expr, stack, context)
     {pid_type, context} = of_fun.(pid, pid_expected, expr, stack, context)
@@ -592,14 +591,13 @@ defmodule Module.Types.Apply do
   end
 
   defp do_remote(GenServer, :call, [pid, msg, timeout], _expected, expr, stack, context, of_fun) do
-    {pid_expected, msg_expected, context} =
-      if is_strict?(Kernel.elem(stack.function, 0)) do
-        {pid_type, context} = self_pid_type(stack, context)
-        msg_expected = genserver_request_type(msg, :handle_call, 3, context, stack)
-        {pid_type, msg_expected, context}
-      else
-        {term(), term(), context}
-      end
+    # if is_strict?(Kernel.elem(stack.function, 0)) do
+    {pid_type, context} = self_pid_type(stack, context)
+    msg_expected = genserver_request_type(msg, :handle_call, 3, context, stack)
+    {pid_expected, msg_expected, context} = {pid_type, msg_expected, context}
+    # else
+    #   {term(), term(), context}
+    # end
 
     {msg_type, context} = of_fun.(msg, msg_expected, expr, stack, context)
     {pid_type, context} = of_fun.(pid, pid_expected, expr, stack, context)
@@ -612,14 +610,13 @@ defmodule Module.Types.Apply do
   end
 
   defp do_remote(GenServer, :cast, [pid, msg], _expected, expr, stack, context, of_fun) do
-    {pid_expected, msg_expected, context} =
-      if is_strict?(Kernel.elem(stack.function, 0)) do
-        {pid_type, context} = self_pid_type(stack, context)
-        msg_expected = genserver_request_type(msg, :handle_cast, 2, context, stack)
-        {pid_type, msg_expected, context}
-      else
-        {term(), term(), context}
-      end
+    # if is_strict?(Kernel.elem(stack.function, 0)) do
+    {pid_type, context} = self_pid_type(stack, context)
+    msg_expected = genserver_request_type(msg, :handle_cast, 2, context, stack)
+    {pid_expected, msg_expected, context} = {pid_type, msg_expected, context}
+    # else
+    #   {term(), term(), context}
+    # end
 
     {msg_type, context} = of_fun.(msg, msg_expected, expr, stack, context)
     {pid_type, context} = of_fun.(pid, pid_expected, expr, stack, context)
@@ -1457,12 +1454,12 @@ defmodule Module.Types.Apply do
       zip_map_reduce(args, domain, context, &of_fun.(&1, &2, expr, stack, &3))
 
     # Apply Strict subtyping
-    if is_strict?(fun) and not zip_subtype?(args_types, domain) do
-      error = {:badlocal, Kernel.elem(local_info, 1), args_types, expr, context}
-      {error_type(), error(error, with_span(elem(expr, 1), fun), stack, context)}
-    else
-      local_apply(local_info, fun, args_types, expr, stack, context)
-    end
+    # if is_strict?(fun) and not zip_subtype?(args_types, domain) do
+    #   error = {:badlocal, Kernel.elem(local_info, 1), args_types, expr, context}
+    #   {error_type(), error(error, with_span(elem(expr, 1), fun), stack, context)}
+    # else
+    local_apply(local_info, fun, args_types, expr, stack, context)
+    # end
   end
 
   defp local_domain(fun, args, expected, meta, stack, context) do
