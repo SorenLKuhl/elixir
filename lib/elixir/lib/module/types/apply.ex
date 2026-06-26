@@ -2357,13 +2357,13 @@ defmodule Module.Types.Apply do
           reply_response =
             case tuple_fetch(intersection(return_type, reply_shape), 1) do
               {_, type} -> type
-              _ -> none()
+              _ -> term()
             end
 
           stop_response =
             case tuple_fetch(intersection(return_type, stop_reply_shape), 2) do
               {_, type} -> type
-              _ -> none()
+              _ -> term()
             end
 
           response = union(reply_response, stop_response)
