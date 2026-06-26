@@ -2283,7 +2283,7 @@ defmodule Module.Types.Apply do
   # Helper for GenServer.call type inference
   defp remote_apply_genserver_call(pid_type, request_type) do
     pid_call_sigs = pid_call_sigs(pid_type)
-    IO.puts("pid_call_sigs: #{inspect(pid_call_sigs, pretty: true)}")
+
     if pid_call_sigs == :none or pid_call_sigs == :term or pid_call_sigs == fun() do
       {:ok, dynamic()}
     else
